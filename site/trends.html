@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trends - DMV Public Safety Analytics</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">DMV Public Safety Analytics</a>
+  <div class="links">
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="map.html">Live Map</a>
+    <a class="link active" href="trends.html">Trends</a>
+    <a class="link" href="about.html">About the Pipeline</a>
+  </div>
+</nav>
+<main>
+  <h1>Trends</h1>
+  <p class="subtitle">Incident volume and category patterns from the unified fct_incidents warehouse.</p>
+
+  <div class="panel">
+    <h2>Daily incident volume (last 90 days)</h2>
+    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Top offense categories (last 7 days)</h2>
+    <div class="chart-wrap"><canvas id="chart-category"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Jurisdiction comparison (last 90 days)</h2>
+    <div class="chart-wrap"><canvas id="chart-jurisdiction"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Incidents by day of week and hour (last 90 days)</h2>
+    <div id="heatmap" class="heatmap-grid"></div>
+  </div>
+
+  <footer class="data-note">
+    Data as of last published agency data. Both agencies publish with a lag
+    of one or more days, so the most recent day or two is typically
+    incomplete.
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="js/trends.js"></script>
+</body>
+</html>

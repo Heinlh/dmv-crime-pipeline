@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>About the Pipeline - DMV Public Safety Analytics</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">DMV Public Safety Analytics</a>
+  <div class="links">
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="map.html">Live Map</a>
+    <a class="link" href="trends.html">Trends</a>
+    <a class="link active" href="about.html">About the Pipeline</a>
+  </div>
+</nav>
+<main>
+  <h1>About the Pipeline</h1>
+  <p class="subtitle">Ingestion, storage, and transformation behind this dashboard.</p>
+
+  <div class="panel">
+    <h2>Architecture</h2>
+    <p>
+      Two Python extractors pull incident-level data from each agency's
+      public API: the Socrata SODA API for Montgomery County, and an
+      ArcGIS FeatureServer for Washington DC. Each extractor is
+      incremental, tracking a per-source watermark and re-pulling a 24 hour
+      overlap window to catch late agency corrections. Raw API responses
+      land untouched, as parquet, partitioned by source and extraction
+      date, so the warehouse can always be rebuilt from the landing zone.
+    </p>
+    <p>
+      DuckDB rebuilds the raw tables from every parquet file landed so far,
+      then a SQL transform dedupes on the source incident id (keeping the
+      latest version), standardizes timestamps and locations, and maps each
+      jurisdiction's offense labels into one shared taxonomy: violent,
+      property, vehicle, drug, society, other, each with a 1-10 severity
+      weight. The result lands in <code>marts.fct_incidents</code>, one row
+      per incident, upserted idempotently on a global incident key. A
+      lightweight export step then snapshots the warehouse into the
+      JSON/GeoJSON this site reads.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>Design decisions</h2>
+    <ul>
+      <li><strong>Raw means raw.</strong> The landing zone stores exactly
+        what the APIs return, as strings. Typing and cleaning happen only
+        in SQL, so a source-side type quirk never breaks ingestion.</li>
+      <li><strong>Idempotent everywhere.</strong> Raw tables are full
+        rebuilds from parquet; the fact table uses INSERT OR REPLACE on a
+        globally unique incident key. Re-running any step is always safe.</li>
+      <li><strong>Category mapping is transparent.</strong> DC's closed set
+        of nine offenses is mapped as explicit data
+        (<code>dim_offense_map</code>); Montgomery County's dozens of NIBRS
+        categories are mapped by documented keyword rules.</li>
+      <li><strong>Locations stay block-level as published.</strong> Failed
+        agency geocodes are stored as NULL, never guessed or sharpened.</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Data notes</h2>
+    <ul>
+      <li>Montgomery County: dataMontgomery Crime dataset (icn6-v9z3),
+        recorded crimes since July 2016, UCR/NIBRS classified, preliminary
+        reports subject to change.</li>
+      <li>Washington DC: MPD Crime Incidents feature layers, one per
+        calendar year. Coordinates are anonymized to the block.</li>
+      <li>Both agencies publish with a lag of one or more days. This site
+        says "as of last published data," never "live."</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>
