@@ -24,7 +24,10 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
 - `export/export_site_data.py` snapshots the warehouse into `site/data/*.json`
   and `site/data/incidents.geojson` (gitignored, regenerated every run)
 - `site/` static HTML/CSS/JS (Leaflet + Chart.js via CDN, no build step,
-  no framework) reading `site/data/`; four pages, nav repeated per page
+  no framework) reading `site/data/`; three pages (Home, Trends, About),
+  nav repeated per page. `site/js/common.js` holds the shared friendly
+  taxonomy labels/colors/formatters used on every page -- raw
+  `offense_category` values never reach the UI unlabeled.
 - `.github/workflows/pipeline.yml` daily cron: run the pipeline, deploy
   `site/` to GitHub Pages via `actions/deploy-pages`
 - Warehouse file: `data/warehouse/crime.duckdb` (gitignored)

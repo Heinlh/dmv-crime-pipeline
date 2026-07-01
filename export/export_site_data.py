@@ -45,6 +45,22 @@ def _summary(con) -> dict:
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 48 HOUR)
         FROM marts.fct_incidents
     """).fetchone()
+    today_count, last_7d, prev_7d, pct_missing_coords = con.execute(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE CAST(occurred_at AS DATE) = current_date),
+            COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 7 DAY),
+            COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 14 DAY
+                                AND occurred_at < {NOW} - INTERVAL 7 DAY),
+            100.0 * COUNT(*) FILTER (WHERE latitude IS NULL) / COUNT(*)
+        FROM marts.fct_incidents
+    """).fetchone()
+    top_category_row = con.execute(f"""
+        SELECT offense_category, COUNT(*) AS n
+        FROM marts.fct_incidents
+        WHERE occurred_at >= {NOW} - INTERVAL 7 DAY
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 1
+    """).fetchone()
+    pct_change_7d = round((last_7d - prev_7d) / prev_7d * 100, 1) if prev_7d else None
     return {
         "last_updated": con.execute("SELECT strftime(now(), '%Y-%m-%dT%H:%M:%SZ')").fetchone()[0],
         "sources_active": [j for j, _ in by_source],
@@ -52,6 +68,12 @@ def _summary(con) -> dict:
         "records_by_jurisdiction": {j: n for j, n in by_source},
         "new_incidents_24h": new_24h,
         "new_incidents_48h": new_48h,
+        "today_count": today_count,
+        "last_7d_count": last_7d,
+        "prev_7d_count": prev_7d,
+        "pct_change_7d": pct_change_7d,
+        "top_category_7d": top_category_row[0] if top_category_row else None,
+        "pct_missing_coords": round(pct_missing_coords, 1),
         "pipeline_status": "ok",
     }
 
@@ -89,9 +111,15 @@ def _trends_daily(con) -> list[dict]:
 
 def _trends_category(con) -> list[dict]:
     return _rows_as_dicts(con, f"""
-        SELECT jurisdiction, offense_category, SUM(incident_count) AS count
+        SELECT
+            jurisdiction, offense_category,
+            COALESCE(SUM(incident_count) FILTER (
+                WHERE occurred_date >= current_date - {CATEGORY_WINDOW_DAYS}), 0) AS count,
+            COALESCE(SUM(incident_count) FILTER (
+                WHERE occurred_date >= current_date - 2 * {CATEGORY_WINDOW_DAYS}
+                  AND occurred_date < current_date - {CATEGORY_WINDOW_DAYS}), 0) AS prev_count
         FROM marts.daily_counts
-        WHERE occurred_date >= current_date - {CATEGORY_WINDOW_DAYS}
+        WHERE occurred_date >= current_date - 2 * {CATEGORY_WINDOW_DAYS}
         GROUP BY 1, 2
         ORDER BY 3 DESC
     """)
