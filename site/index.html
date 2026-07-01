@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMV Public Safety Analytics</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">DMV Public Safety Analytics</a>
+  <div class="links">
+    <a class="link active" href="index.html">Overview</a>
+    <a class="link" href="map.html">Live Map</a>
+    <a class="link" href="trends.html">Trends</a>
+    <a class="link" href="about.html">About the Pipeline</a>
+  </div>
+</nav>
+<main>
+  <h1>Overview</h1>
+  <p class="subtitle">Public crime data for the DMV area, ingested daily from official agency APIs.</p>
+
+  <div id="status-cards" class="card-grid">
+    <p class="loading">Loading pipeline status...</p>
+  </div>
+
+  <div class="panel">
+    <h2>What this is</h2>
+    <p>
+      This platform pulls incident-level crime data directly from Montgomery
+      County (dataMontgomery Socrata API) and the District of Columbia
+      (MPD FeatureServer), standardizes it into a shared taxonomy, and
+      republishes it as an interactive map and analytics dashboard.
+      Data reflects what each agency has published as of the last pipeline
+      run, not real-time activity, and locations stay at the block level as
+      published by the source agencies.
+    </p>
+    <p>
+      See <a href="map.html">Live Map</a> for recent incidents,
+      <a href="trends.html">Trends</a> for volume and category breakdowns,
+      and <a href="about.html">About the Pipeline</a> for the architecture
+      behind it.
+    </p>
+  </div>
+
+  <footer class="data-note">
+    Data as of last published agency data, not live. Sources: dataMontgomery
+    Crime dataset (icn6-v9z3), DC MPD Crime Incidents feature layers.
+  </footer>
+</main>
+<script src="js/overview.js"></script>
+</body>
+</html>
