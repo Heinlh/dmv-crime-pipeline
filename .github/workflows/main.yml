@@ -1,0 +1,49 @@
+name: Daily crime data pipeline
+
+on:
+  schedule:
+    - cron: "0 11 * * *"  # ~7am ET / 6am during DST, after both agencies publish overnight batches
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  run-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run pipeline (extract, load, transform, export)
+        env:
+          SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
+        run: python run_pipeline.py
+
+      # Runs even if the pipeline step above reported extractor failures,
+      # so the site still deploys with whatever data landed. Each run starts
+      # from a clean checkout (data/ and state/ are gitignored, not
+      # committed), so extraction always covers the last INITIAL_LOOKBACK_DAYS
+      # window rather than a true incremental pull from a prior run.
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: site
+
+      - id: deployment
+        if: always()
+        uses: actions/deploy-pages@v4
