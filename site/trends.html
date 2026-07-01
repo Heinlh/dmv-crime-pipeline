@@ -10,8 +10,7 @@
 <nav class="topnav">
   <a class="brand" href="index.html">DMV Public Safety Analytics</a>
   <div class="links">
-    <a class="link" href="index.html">Overview</a>
-    <a class="link" href="map.html">Live Map</a>
+    <a class="link" href="index.html">Home</a>
     <a class="link active" href="trends.html">Trends</a>
     <a class="link" href="about.html">About the Pipeline</a>
   </div>
@@ -23,21 +22,26 @@
   <div class="panel">
     <h2>Daily incident volume (last 90 days)</h2>
     <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+    <p class="chart-caption" id="caption-daily"></p>
   </div>
 
   <div class="panel">
-    <h2>Top offense categories (last 7 days)</h2>
+    <h2>Category breakdown (last 7 days vs. previous 7 days)</h2>
+    <div id="category-cards" class="card-grid"></div>
     <div class="chart-wrap"><canvas id="chart-category"></canvas></div>
+    <p class="chart-caption" id="caption-category"></p>
   </div>
 
   <div class="panel">
     <h2>Jurisdiction comparison (last 90 days)</h2>
     <div class="chart-wrap"><canvas id="chart-jurisdiction"></canvas></div>
+    <p class="chart-caption" id="caption-jurisdiction"></p>
   </div>
 
   <div class="panel">
-    <h2>Incidents by day of week and hour (last 90 days)</h2>
+    <h2>When are incidents most commonly reported? (last 90 days)</h2>
     <div id="heatmap" class="heatmap-grid"></div>
+    <p class="chart-caption" id="caption-heatmap">Darker boxes show time periods with more reported incidents.</p>
   </div>
 
   <footer class="data-note">
@@ -47,6 +51,7 @@
   </footer>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="js/common.js"></script>
 <script src="js/trends.js"></script>
 </body>
 </html>

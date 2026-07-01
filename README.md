@@ -33,10 +33,14 @@ build step) that reads those files directly:
 
 | Page | Shows |
 |---|---|
-| site/index.html | Pipeline status: last run, sources active, records processed, new incidents in 24h/48h |
-| site/map.html | Clustered incident map, filterable by jurisdiction, date range, category, severity |
-| site/trends.html | Daily volume, category breakdown, jurisdiction comparison, day/hour heatmap |
+| site/index.html | Landing page: freshness banner, plain-English weekly summary and KPI cards, then the clustered incident map with a legend, filterable by jurisdiction, date range, category, severity |
+| site/trends.html | Daily volume, category breakdown with week-over-week deltas, jurisdiction comparison, day/hour heatmap, each with a plain-language caption |
 | site/about.html | This architecture, written for a non-technical visitor |
+
+`site/js/common.js` holds the shared friendly-label taxonomy (`CATEGORY_LABELS`,
+`CATEGORY_DESCRIPTIONS`), colors, and formatters used across pages, so raw
+taxonomy values (`offense_category`, NIBRS codes, etc.) never reach the UI
+directly.
 
 ## Setup
 

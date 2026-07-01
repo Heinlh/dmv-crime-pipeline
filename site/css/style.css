@@ -125,6 +125,57 @@ p.subtitle { color: var(--muted); margin-top: 0; }
 
 .chart-wrap { position: relative; height: 320px; }
 
+.chart-caption {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0;
+}
+
+.freshness-banner {
+  background: var(--navy-light);
+  color: #dce6f2;
+  font-size: 0.82rem;
+  padding: 0.5rem 1.5rem;
+  text-align: center;
+}
+
+.summary-sentence {
+  font-size: 1.15rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.legend-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.4rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  cursor: help;
+}
+
+.legend-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.legend-notes {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
 .badge {
   display: inline-block;
   padding: 0.1rem 0.5rem;

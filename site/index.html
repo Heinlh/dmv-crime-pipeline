@@ -5,49 +5,78 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DMV Public Safety Analytics</title>
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 </head>
 <body>
 <nav class="topnav">
   <a class="brand" href="index.html">DMV Public Safety Analytics</a>
   <div class="links">
-    <a class="link active" href="index.html">Overview</a>
-    <a class="link" href="map.html">Live Map</a>
+    <a class="link active" href="index.html">Home</a>
     <a class="link" href="trends.html">Trends</a>
     <a class="link" href="about.html">About the Pipeline</a>
   </div>
 </nav>
-<main>
-  <h1>Overview</h1>
-  <p class="subtitle">Public crime data for the DMV area, ingested daily from official agency APIs.</p>
 
-  <div id="status-cards" class="card-grid">
-    <p class="loading">Loading pipeline status...</p>
+<div class="freshness-banner" id="freshness-banner">Loading pipeline status...</div>
+
+<main>
+  <p id="summary-sentence" class="summary-sentence loading">Loading this week's summary...</p>
+
+  <div id="kpi-cards" class="card-grid"></div>
+
+  <div class="filters">
+    <label>Jurisdiction
+      <select id="f-jurisdiction">
+        <option value="">All</option>
+        <option value="dc">Washington DC</option>
+        <option value="moco">Montgomery County</option>
+      </select>
+    </label>
+    <label>Date range
+      <select id="f-range">
+        <option value="1">Last 24 hours</option>
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+      </select>
+    </label>
+    <label>Category
+      <select id="f-category">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label>Min. severity
+      <select id="f-severity">
+        <option value="1" selected>1+</option>
+        <option value="4">4+</option>
+        <option value="7">7+</option>
+      </select>
+    </label>
+    <span class="loading" id="result-count"></span>
   </div>
 
-  <div class="panel">
-    <h2>What this is</h2>
-    <p>
-      This platform pulls incident-level crime data directly from Montgomery
-      County (dataMontgomery Socrata API) and the District of Columbia
-      (MPD FeatureServer), standardizes it into a shared taxonomy, and
-      republishes it as an interactive map and analytics dashboard.
-      Data reflects what each agency has published as of the last pipeline
-      run, not real-time activity, and locations stay at the block level as
-      published by the source agencies.
-    </p>
-    <p>
-      See <a href="map.html">Live Map</a> for recent incidents,
-      <a href="trends.html">Trends</a> for volume and category breakdowns,
-      and <a href="about.html">About the Pipeline</a> for the architecture
-      behind it.
-    </p>
+  <div id="map"></div>
+
+  <div class="legend panel" id="legend">
+    <h2>What am I looking at?</h2>
+    <div class="legend-swatches" id="legend-swatches"></div>
+    <ul class="legend-notes">
+      <li>Numbers in circles show how many incidents are grouped together at the current zoom level. Zoom in to split them apart.</li>
+      <li>Larger dots are more severe offenses; smaller dots are less severe.</li>
+      <li>Only incidents with a published location are shown; block-level only, never sharpened.</li>
+    </ul>
   </div>
 
   <footer class="data-note">
     Data as of last published agency data, not live. Sources: dataMontgomery
     Crime dataset (icn6-v9z3), DC MPD Crime Incidents feature layers.
+    See <a href="about.html">About the Pipeline</a> for how this works.
   </footer>
 </main>
-<script src="js/overview.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="js/common.js"></script>
+<script src="js/home.js"></script>
 </body>
 </html>
