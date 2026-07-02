@@ -3,25 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DMV Public Safety Analytics</title>
+<title>DMV Crime Watch - Live Map</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%235ec8f2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 </head>
 <body>
 <nav class="topnav">
-  <a class="brand" href="index.html">DMV Public Safety Analytics</a>
+  <a class="brand" href="index.html"><span class="pulse" aria-hidden="true"></span>DMV<span class="tag">//</span>CRIME WATCH</a>
   <div class="links">
-    <a class="link active" href="index.html">Home</a>
+    <a class="link active" href="index.html">Map</a>
     <a class="link" href="trends.html">Trends</a>
-    <a class="link" href="about.html">About the Pipeline</a>
+    <a class="link" href="events.html">Events</a>
+    <a class="link" href="about.html">About</a>
   </div>
 </nav>
 
-<div class="freshness-banner" id="freshness-banner">Loading pipeline status...</div>
+<div class="freshness-banner" id="freshness-banner">LOADING PIPELINE STATUS...</div>
 
 <main>
+  <p class="kicker">Incident map // last 90 days</p>
   <p id="summary-sentence" class="summary-sentence loading">Loading this week's summary...</p>
 
   <div id="kpi-cards" class="card-grid"></div>
@@ -39,6 +41,7 @@
         <option value="1">Last 24 hours</option>
         <option value="7">Last 7 days</option>
         <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
       </select>
     </label>
     <label>Category
@@ -46,32 +49,34 @@
         <option value="">All</option>
       </select>
     </label>
-    <label>Min. severity
+    <label title="This project's own 1-10 weighting, not an official scale">Min. severity
       <select id="f-severity">
         <option value="1" selected>1+</option>
         <option value="4">4+</option>
         <option value="7">7+</option>
       </select>
     </label>
-    <span class="loading" id="result-count"></span>
+    <span class="result-count" id="result-count"></span>
   </div>
 
   <div id="map"></div>
 
-  <div class="legend panel" id="legend">
+  <div class="legend panel" id="legend" style="margin-top: 1.4rem;">
     <h2>What am I looking at?</h2>
     <div class="legend-swatches" id="legend-swatches"></div>
     <ul class="legend-notes">
+      <li>Hover a dot to see the offense; click it for the full summary card.</li>
       <li>Numbers in circles show how many incidents are grouped together at the current zoom level. Zoom in to split them apart.</li>
-      <li>Larger dots are more severe offenses; smaller dots are less severe.</li>
-      <li>Only incidents with a published location are shown; block-level only, never sharpened.</li>
+      <li>Only incidents with a published location are shown; locations are block-level as published, never sharpened.</li>
+      <li>"Min. severity" uses this project's own 1-10 weighting (10 = homicide), not an official police scale.</li>
     </ul>
   </div>
 
   <footer class="data-note">
     Data as of last published agency data, not live. Sources: dataMontgomery
     Crime dataset (icn6-v9z3), DC MPD Crime Incidents feature layers.
-    See <a href="about.html">About the Pipeline</a> for how this works.
+    Looking for older data? <a href="trends.html">Trends</a> covers the full
+    history since 2016. See <a href="about.html">About</a> for how this works.
   </footer>
 </main>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

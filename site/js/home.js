@@ -1,4 +1,7 @@
-// --- freshness banner + summary + KPI cards ---
+// Home page: freshness banner, plain-language summary, KPI tiles, and
+// the incident map (hover tooltip, click summary card, filter row).
+
+// --- freshness banner + summary + KPI tiles ---
 
 function renderTrendDirection(pct) {
   if (pct > 3) return `up ${pct.toFixed(1)}% from`;
@@ -13,10 +16,10 @@ async function renderSummary() {
   try {
     const s = await fetchJson("data/summary.json");
 
-    banner.textContent = `Data as of last published agency data: ${fmtDateTime(s.last_updated)}. ` +
-      `${s.pct_missing_coords}% of incidents have no published location and aren't shown on the map.`;
+    banner.innerHTML = `<span class="ok">&#9679; OK</span> DATA AS OF ${esc(fmtDateTime(s.last_updated).toUpperCase())} ` +
+      `&middot; ${esc(String(s.pct_missing_coords))}% OF INCIDENTS HAVE NO PUBLISHED LOCATION AND AREN'T MAPPED`;
 
-    const topCategoryLabel = CATEGORY_LABELS[s.top_category_7d] || s.top_category_7d || "n/a";
+    const topCategoryLabel = categoryLabel(s.top_category_7d);
     const direction = s.pct_change_7d === null
       ? "about the same as"
       : renderTrendDirection(s.pct_change_7d);
@@ -24,34 +27,37 @@ async function renderSummary() {
       `incidents, ${direction} the previous 7 days. The most common category was ${topCategoryLabel}.`;
     sentence.classList.remove("loading");
 
+    const deltaClass = s.pct_change_7d > 0 ? "up" : s.pct_change_7d < 0 ? "down" : "";
     const kpis = [
-      { label: "New Today", value: s.today_count.toLocaleString() },
-      { label: "Last 7 Days", value: s.last_7d_count.toLocaleString(), sub: s.pct_change_7d === null ? "" : `${fmtPct(s.pct_change_7d)} vs. previous 7 days` },
-      { label: "Most Common Category", value: topCategoryLabel },
-      { label: "Sources Active", value: s.sources_active.length, sub: s.sources_active.map(j => JURISDICTION_LABELS[j] || j).join(", ") },
-      { label: "Last Updated", value: fmtDateTime(s.last_updated) },
+      { label: "Last 24 Hours", value: fmtNumber(s.new_incidents_24h) },
+      { label: "Last 7 Days", value: fmtNumber(s.last_7d_count),
+        sub: s.pct_change_7d === null ? "" : `${fmtPct(s.pct_change_7d)} vs. previous 7 days`, subClass: deltaClass },
+      { label: "Most Common (7d)", value: topCategoryLabel },
+      { label: "Records Since 2016", value: fmtNumber(s.total_records),
+        sub: s.data_start_date ? `warehouse starts ${fmtDate(s.data_start_date)}` : "" },
     ];
     cards.innerHTML = kpis.map(k => `
       <div class="card">
-        <div class="label">${k.label}</div>
-        <div class="value">${k.value}</div>
-        <div class="sub">${k.sub || ""}</div>
+        <div class="label">${esc(k.label)}</div>
+        <div class="value">${esc(k.value)}</div>
+        <div class="sub ${k.subClass || ""}">${esc(k.sub || "")}</div>
       </div>
     `).join("");
   } catch (err) {
-    banner.textContent = `Could not load pipeline status (${err.message}). Run the pipeline to generate site/data/.`;
+    banner.textContent = `COULD NOT LOAD PIPELINE STATUS (${err.message}). Run the pipeline to generate site/data/.`;
     sentence.textContent = "";
   }
 }
 
-// --- legend ---
+// --- legend (with live counts for the current filter) ---
 
-function renderLegend() {
+function renderLegend(countsByCategory) {
   const container = document.getElementById("legend-swatches");
-  container.innerHTML = Object.keys(CATEGORY_LABELS).map(cat => `
-    <div class="legend-item" title="${CATEGORY_DESCRIPTIONS[cat]}">
+  container.innerHTML = CATEGORY_ORDER.map(cat => `
+    <div class="legend-item" title="${esc(CATEGORY_DESCRIPTIONS[cat])}">
       <span class="legend-swatch" style="background:${CATEGORY_COLORS[cat]}"></span>
-      ${CATEGORY_LABELS[cat]}
+      ${esc(CATEGORY_LABELS[cat])}
+      <span class="count">${countsByCategory ? fmtNumber(countsByCategory[cat] || 0) : ""}</span>
     </div>
   `).join("");
 }
@@ -60,10 +66,10 @@ function renderLegend() {
 
 function populateCategoryFilter() {
   const select = document.getElementById("f-category");
-  for (const [value, label] of Object.entries(CATEGORY_LABELS)) {
+  for (const cat of CATEGORY_ORDER) {
     const opt = document.createElement("option");
-    opt.value = value;
-    opt.textContent = label;
+    opt.value = cat;
+    opt.textContent = CATEGORY_LABELS[cat];
     select.appendChild(opt);
   }
 }
@@ -71,32 +77,27 @@ function populateCategoryFilter() {
 // --- map ---
 
 const map = L.map("map").setView([38.95, -77.05], 10);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: "&copy; OpenStreetMap contributors",
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
   maxZoom: 19,
 }).addTo(map);
 
-const clusterGroup = L.markerClusterGroup();
+const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 46 });
 map.addLayer(clusterGroup);
 
-let allFeatures = [];
+let allIncidents = [];
 
-function severityRadius(weight) {
-  return 4 + Math.min(weight, 10) * 0.8;
-}
-
-function popupHtml(props) {
-  const when = props.occurred_at ? fmtDateTime(props.occurred_at) : "Unknown";
-  const categoryLabel = CATEGORY_LABELS[props.offense_category] || props.offense_category;
+function popupHtml(inc) {
+  const cat = inc.offense_category;
   return `
-    <strong>${props.offense_raw || "Unknown offense"}</strong>
-    <span class="badge ${props.offense_category}">${categoryLabel}</span><br>
-    ${when}<br>
-    ${JURISDICTION_LABELS[props.jurisdiction] || props.jurisdiction}
-    ${props.area_name ? " &middot; " + props.area_name : ""}<br>
-    ${props.block_address || ""}<br>
-    ${props.case_number ? "Case #" + props.case_number + "<br>" : ""}
-    Severity: ${props.severity_weight}/10
+    <div class="incident-card">
+      <span class="badge ${esc(cat)}">${esc(categoryLabel(cat))}</span>
+      <div class="title">${esc(inc.offense_raw || "Unknown offense")}</div>
+      <div class="when">${esc(fmtDateTime(inc.occurred_at))}</div>
+      <div class="row"><strong>${esc(inc.block_address || "Location withheld")}</strong></div>
+      <div class="row">${esc(jurisdictionLabel(inc.jurisdiction))}${inc.area_name ? " &middot; " + esc(inc.area_name) : ""}</div>
+      ${inc.case_number ? `<div class="row">Case #${esc(inc.case_number)}</div>` : ""}
+    </div>
   `;
 }
 
@@ -109,38 +110,44 @@ function applyFilters() {
 
   clusterGroup.clearLayers();
   let shown = 0;
+  const countsByCategory = {};
 
-  for (const feature of allFeatures) {
-    const props = feature.properties;
-    if (jurisdiction && props.jurisdiction !== jurisdiction) continue;
-    if (category && props.offense_category !== category) continue;
-    if (props.severity_weight < minSeverity) continue;
-    const occurred = new Date(props.occurred_at).getTime();
-    if (Number.isNaN(occurred) || occurred < cutoff) continue;
+  for (const inc of allIncidents) {
+    if (inc.latitude === null || inc.longitude === null) continue;
+    if (jurisdiction && inc.jurisdiction !== jurisdiction) continue;
+    if (category && inc.offense_category !== category) continue;
+    if (inc.severity_weight < minSeverity) continue;
+    if (Number.isNaN(inc._ts) || inc._ts < cutoff) continue;
 
-    const [lon, lat] = feature.geometry.coordinates;
-    const marker = L.circleMarker([lat, lon], {
-      radius: severityRadius(props.severity_weight),
-      color: CATEGORY_COLORS[props.offense_category] || "#7f8c8d",
-      fillColor: CATEGORY_COLORS[props.offense_category] || "#7f8c8d",
+    const color = CATEGORY_COLORS[inc.offense_category] || CATEGORY_COLORS.other;
+    // Uniform radius: category is the only encoding on the dot. The 2px
+    // page-color stroke is the "surface ring" keeping overlaps legible.
+    const marker = L.circleMarker([inc.latitude, inc.longitude], {
+      radius: 7,
+      fillColor: color,
       fillOpacity: 0.85,
-      weight: 1,
+      color: "#0a0e14",
+      weight: 2,
     });
-    marker.bindPopup(popupHtml(props));
+    marker.bindTooltip(inc.offense_raw || "Unknown offense", { direction: "top", opacity: 1 });
+    marker.bindPopup(popupHtml(inc), { maxWidth: 300 });
     clusterGroup.addLayer(marker);
+    countsByCategory[inc.offense_category] = (countsByCategory[inc.offense_category] || 0) + 1;
     shown++;
   }
 
   document.getElementById("result-count").textContent = `${shown.toLocaleString()} incidents shown`;
+  renderLegend(countsByCategory);
 }
 
 async function initMap() {
   try {
-    const geojson = await fetchJson("data/incidents.geojson");
-    allFeatures = geojson.features;
+    const { incidents } = await fetchIncidents();
+    allIncidents = incidents;
     applyFilters();
   } catch (err) {
-    document.getElementById("result-count").textContent = `Could not load incidents (${err.message}). Run the pipeline to generate site/data/.`;
+    document.getElementById("result-count").textContent =
+      `Could not load incidents (${err.message}). Run the pipeline to generate site/data/.`;
   }
 }
 
@@ -149,6 +156,6 @@ async function initMap() {
 );
 
 populateCategoryFilter();
-renderLegend();
+renderLegend(null);
 renderSummary();
 initMap();
