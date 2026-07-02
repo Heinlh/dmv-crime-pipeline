@@ -17,6 +17,7 @@ concurrency:
 jobs:
   run-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 90  # the full-history backfill (cold cache) takes a while
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -29,16 +30,27 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # data/ and state/ are gitignored, so the raw parquet zone and the
+      # per-source watermarks are carried between daily runs by the Actions
+      # cache instead. On a cache hit the extractors pull only the last day
+      # or so; on a miss (first run, or cache evicted) they re-backfill the
+      # full history from BACKFILL_START, which is slow but safe because
+      # every downstream step is idempotent.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            data/raw
+            state
+          key: pipeline-data-${{ github.run_id }}
+          restore-keys: pipeline-data-
+
       - name: Run pipeline (extract, load, transform, export)
         env:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
         run: python run_pipeline.py
 
       # Runs even if the pipeline step above reported extractor failures,
-      # so the site still deploys with whatever data landed. Each run starts
-      # from a clean checkout (data/ and state/ are gitignored, not
-      # committed), so extraction always covers the last INITIAL_LOOKBACK_DAYS
-      # window rather than a true incremental pull from a prior run.
+      # so the site still deploys with whatever data landed.
       - uses: actions/upload-pages-artifact@v3
         if: always()
         with:

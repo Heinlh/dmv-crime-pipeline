@@ -3,51 +3,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trends - DMV Public Safety Analytics</title>
+<title>Trends - DMV Crime Watch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%235ec8f2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <nav class="topnav">
-  <a class="brand" href="index.html">DMV Public Safety Analytics</a>
+  <a class="brand" href="index.html"><span class="pulse" aria-hidden="true"></span>DMV<span class="tag">//</span>CRIME WATCH</a>
   <div class="links">
-    <a class="link" href="index.html">Home</a>
+    <a class="link" href="index.html">Map</a>
     <a class="link active" href="trends.html">Trends</a>
-    <a class="link" href="about.html">About the Pipeline</a>
+    <a class="link" href="events.html">Events</a>
+    <a class="link" href="about.html">About</a>
   </div>
 </nav>
 <main>
+  <p class="kicker">Trends // full history since 2016</p>
   <h1>Trends</h1>
-  <p class="subtitle">Incident volume and category patterns from the unified fct_incidents warehouse.</p>
+  <p class="subtitle">Pick a time period and a granularity; every chart below follows the same slice.</p>
+
+  <div class="filters" id="controls">
+    <label>Period
+      <span class="segmented" id="preset-buttons" role="group" aria-label="Period presets">
+        <button data-preset="90d">90D</button>
+        <button data-preset="1y">1Y</button>
+        <button data-preset="ytd">YTD</button>
+        <button data-preset="all" class="active">ALL</button>
+      </span>
+    </label>
+    <label>From
+      <input type="month" id="f-from" min="2016-07">
+    </label>
+    <label>To
+      <input type="month" id="f-to" min="2016-07">
+    </label>
+    <label>Granularity
+      <span class="segmented" id="gran-buttons" role="group" aria-label="Granularity">
+        <button data-gran="day">DAY</button>
+        <button data-gran="week">WEEK</button>
+        <button data-gran="month" class="active">MONTH</button>
+      </span>
+    </label>
+    <span class="result-count" id="period-readout"></span>
+  </div>
+
+  <div id="period-cards" class="card-grid"></div>
 
   <div class="panel">
-    <h2>Daily incident volume (last 90 days)</h2>
-    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
-    <p class="chart-caption" id="caption-daily"></p>
+    <div class="panel-head">
+      <h2>Incident volume over time</h2>
+      <button class="table-toggle" id="toggle-volume-table" aria-pressed="false">TABLE</button>
+    </div>
+    <div class="chart-wrap"><canvas id="chart-volume"></canvas></div>
+    <div class="table-scroll" id="volume-table" hidden></div>
+    <p class="chart-caption" id="caption-volume"></p>
   </div>
 
   <div class="panel">
-    <h2>Category breakdown (last 7 days vs. previous 7 days)</h2>
+    <div class="panel-head">
+      <h2>Category breakdown for the selected period</h2>
+      <button class="table-toggle" id="toggle-category-table" aria-pressed="false">TABLE</button>
+    </div>
     <div id="category-cards" class="card-grid"></div>
     <div class="chart-wrap"><canvas id="chart-category"></canvas></div>
+    <div class="table-scroll" id="category-table" hidden></div>
     <p class="chart-caption" id="caption-category"></p>
   </div>
 
   <div class="panel">
-    <h2>Jurisdiction comparison (last 90 days)</h2>
-    <div class="chart-wrap"><canvas id="chart-jurisdiction"></canvas></div>
-    <p class="chart-caption" id="caption-jurisdiction"></p>
-  </div>
-
-  <div class="panel">
-    <h2>When are incidents most commonly reported? (last 90 days)</h2>
+    <h2>When are incidents most commonly reported?</h2>
     <div id="heatmap" class="heatmap-grid"></div>
-    <p class="chart-caption" id="caption-heatmap">Darker boxes show time periods with more reported incidents.</p>
+    <p class="chart-caption" id="caption-heatmap">
+      Fixed to the last 90 days (this view needs incident-level timestamps,
+      which the site only ships for the recent window). Darker cells mean
+      more reported incidents.
+    </p>
   </div>
 
   <footer class="data-note">
     Data as of last published agency data. Both agencies publish with a lag
     of one or more days, so the most recent day or two is typically
-    incomplete.
+    incomplete. Montgomery County data begins July 2016; DC history is
+    pulled from MPD's per-year layers over the same range.
   </footer>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>

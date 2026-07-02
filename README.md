@@ -10,7 +10,7 @@ a shared crime taxonomy across jurisdictions.
 ```
 Socrata API (MoCo)  ─┐
                      ├─> extractors/ ─> data/raw/{source}/*.parquet ─> load/ ─> DuckDB ─> export/ ─> site/data/*.json
-ArcGIS API (DC)     ─┘        (incremental, watermarked)                 (raw -> marts.fct_incidents)   (static JSON/GeoJSON)
+ArcGIS API (DC)     ─┘        (incremental, watermarked)                 (raw -> marts.fct_incidents)   (static JSON)
 ```
 
 Layers in the warehouse (data/warehouse/crime.duckdb):
@@ -26,16 +26,22 @@ Unified taxonomy: violent, property, vehicle, drug, society, other, each
 with a 1 to 10 severity weight that feeds priority case scoring.
 
 `export/export_site_data.py` runs after every load and snapshots the
-warehouse into `site/data/` (summary stats, a 30 day incidents GeoJSON, and
-a few pre-aggregated trend JSON files). `site/` is a static, dependency-free
+warehouse into `site/data/`: `summary.json` (KPIs and freshness),
+`incidents.json` (incident-level detail for the last 90 days, columnar to
+keep the payload small), `trends.json` (pre-aggregated daily counts by
+jurisdiction and category over the full history since 2016, so the trends
+page can serve any period without incident-level data in the browser), and
+`heatmap.json` (weekday x hour counts). `site/` is a static, dependency-free
 HTML/CSS/JS app (Leaflet + Leaflet.markercluster + Chart.js from CDN, no
-build step) that reads those files directly:
+build step) with a dark, restrained-cyber visual identity; the category
+palette is validated for colorblind safety against the dark surface:
 
 | Page | Shows |
 |---|---|
-| site/index.html | Landing page: freshness banner, plain-English weekly summary and KPI cards, then the clustered incident map with a legend, filterable by jurisdiction, date range, category, severity |
-| site/trends.html | Daily volume, category breakdown with week-over-week deltas, jurisdiction comparison, day/hour heatmap, each with a plain-language caption |
-| site/about.html | This architecture, written for a non-technical visitor |
+| site/index.html | Map: freshness banner, plain-English weekly summary and KPI tiles, then the clustered incident map (hover a dot for the offense, click for the full summary card) with a live-count legend, filterable by jurisdiction, date range, category, severity |
+| site/trends.html | Full-history trends with period presets (90D / 1Y / YTD / ALL) plus a custom month range (e.g. 2017-2020) and day/week/month granularity; volume line, category breakdown with prior-period deltas, day/hour heatmap, table view per chart |
+| site/events.html | Searchable incident log over the last 90 days: free-text search (offense, street, case number, district) plus jurisdiction/category/date/sort filters, rendered as summary cards |
+| site/about.html | Purpose, sources, pipeline mechanics, and honest caveats, written for a non-technical visitor |
 
 `site/js/common.js` holds the shared friendly-label taxonomy (`CATEGORY_LABELS`,
 `CATEGORY_DESCRIPTIONS`), colors, and formatters used across pages, so raw
@@ -51,12 +57,13 @@ export SOCRATA_APP_TOKEN= your_token  # optional but recommended, free at
 python run_pipeline.py
 ```
 
-The first run backfills INITIAL_LOOKBACK_DAYS (config.py, default 90).
-Widen it for a deeper backfill, then subsequent runs are incremental:
-each extractor stores a per-source watermark in state/watermarks.json
-and only pulls records newer than it, minus a 24 hour overlap window to
-catch agency corrections. The loader dedupes on the source incident id,
-so overlap never produces duplicates.
+The first run backfills the full available history from BACKFILL_START
+(config.py, July 2016, where the Montgomery County dataset begins; DC's
+per-year layers are discovered from the FeatureServer automatically).
+Subsequent runs are incremental: each extractor stores a per-source
+watermark in state/watermarks.json and only pulls records newer than it,
+minus a 24 hour overlap window to catch agency corrections. The loader
+dedupes on the source incident id, so overlap never produces duplicates.
 
 ## Design decisions
 
@@ -91,9 +98,11 @@ so overlap never produces duplicates.
 python test_pipeline_offline.py
 ```
 
-Runs the full land, load, and transform path against synthetic
+Runs the full land, load, transform, and export path against synthetic
 API-shaped records and asserts dedupe, idempotency, geocode nulling,
-and taxonomy mapping, with no network required.
+taxonomy mapping, and the exported site JSON (including that old records
+stay in the full-history trends but out of the 90 day incident window),
+with no network required.
 
 ## Viewing the site locally
 
@@ -122,11 +131,12 @@ this repo can do for you):
    -> Run workflow) to confirm it deploys, then let the daily schedule take
    over.
 
-Note: `data/` and `state/` are gitignored, so every Actions run starts from
-a clean checkout and re-pulls the last `INITIAL_LOOKBACK_DAYS` window rather
-than truly incrementing from the prior run's watermark. The transform is
-fully idempotent, so this is safe, just less efficient than a local run
-with a persisted `state/watermarks.json`.
+Note: `data/` and `state/` are gitignored, so the workflow carries the raw
+parquet zone and the watermarks between daily runs with `actions/cache`.
+On a cache hit each run pulls only the last day or so; on a miss (first
+run, or cache evicted) it re-backfills the full history from
+`BACKFILL_START`, which is slower but safe because every downstream step
+is idempotent.
 
 ## Roadmap
 
