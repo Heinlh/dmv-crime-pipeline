@@ -21,6 +21,23 @@ SOURCES = {
     "dc": "raw.dc_incidents",
 }
 
+# Columns sql/transform.sql references per raw table. Socrata (and to a
+# lesser degree ArcGIS) omit null fields from responses entirely, so a
+# batch where every record lacks a field lands parquet without that
+# column. Backfill them as NULL VARCHAR so the transform never crashes
+# on a sparse batch.
+EXPECTED_COLUMNS = {
+    "raw.moco_incidents": [
+        "incident_id", "case_number", "start_date", "end_date", "crimename2",
+        "crimename3", "location", "city", "zip_code", "district", "latitude",
+        "longitude", "victims",
+    ],
+    "raw.dc_incidents": [
+        "CCN", "REPORT_DAT", "START_DATE", "END_DATE", "OFFENSE", "BLOCK",
+        "WARD", "LATITUDE", "LONGITUDE", "METHOD",
+    ],
+}
+
 
 def run() -> None:
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +56,8 @@ def run() -> None:
             CREATE OR REPLACE TABLE {table} AS
             SELECT * FROM read_parquet('{glob.as_posix()}', union_by_name=true)
         """)
+        for column in EXPECTED_COLUMNS[table]:
+            con.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{column}" VARCHAR')
         count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         logger.info("Rebuilt %s: %d rows", table, count)
         loaded_any = True

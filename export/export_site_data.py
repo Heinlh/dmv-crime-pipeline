@@ -1,7 +1,20 @@
-"""Export the DuckDB warehouse to static JSON/GeoJSON for the site.
+"""Export the DuckDB warehouse to static JSON for the site.
 
-Runs after load_duckdb.run(). Timestamps are cast to VARCHAR in SQL so the
-JSON output needs no special datetime handling on the Python side.
+Runs after load_duckdb.run(). Four files, each sized for what the page
+actually needs:
+
+  summary.json    small KPI/freshness payload for the home page
+  incidents.json  incident-level detail for the map and the events search,
+                  last INCIDENT_WINDOW_DAYS only (client-side search has to
+                  download this file, so the window is a deliberate cap);
+                  columnar rows to keep the payload compact
+  trends.json     pre-aggregated daily counts by jurisdiction and category
+                  over the FULL history, so the trends page can offer any
+                  period (e.g. 2017-2020) without incident-level data
+  heatmap.json    weekday x hour counts over the last HEATMAP_WINDOW_DAYS
+
+Timestamps are cast to VARCHAR in SQL so the JSON output needs no special
+datetime handling on the Python side.
 """
 
 import json
@@ -14,24 +27,23 @@ from config import SITE_DATA_DIR, WAREHOUSE_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s export: %(message)s")
 logger = logging.getLogger(__name__)
 
-INCIDENT_WINDOW_DAYS = 30
-TREND_WINDOW_DAYS = 90
-CATEGORY_WINDOW_DAYS = 7
+INCIDENT_WINDOW_DAYS = 90
 HEATMAP_WINDOW_DAYS = 90
 
 NOW = "CAST(now() AS TIMESTAMP)"
 
+INCIDENT_COLUMNS = [
+    "incident_key", "jurisdiction", "offense_category", "severity_weight",
+    "offense_raw", "occurred_at", "block_address", "area_name", "city",
+    "case_number", "latitude", "longitude",
+]
+
 
 def _write_json(name: str, data) -> None:
     path = SITE_DATA_DIR / name
-    path.write_text(json.dumps(data, indent=2))
-    logger.info("Wrote %s", path)
-
-
-def _rows_as_dicts(con, sql: str) -> list[dict]:
-    rows = con.execute(sql).fetchall()
-    columns = [d[0] for d in con.description]
-    return [dict(zip(columns, row)) for row in rows]
+    # separators (no indent) keeps the larger payloads as small as possible
+    path.write_text(json.dumps(data, separators=(",", ":")))
+    logger.info("Wrote %s (%.1f KB)", path, path.stat().st_size / 1024)
 
 
 def _summary(con) -> dict:
@@ -45,13 +57,14 @@ def _summary(con) -> dict:
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 48 HOUR)
         FROM marts.fct_incidents
     """).fetchone()
-    today_count, last_7d, prev_7d, pct_missing_coords = con.execute(f"""
+    today_count, last_7d, prev_7d, pct_missing_coords, data_start = con.execute(f"""
         SELECT
             COUNT(*) FILTER (WHERE CAST(occurred_at AS DATE) = current_date),
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 7 DAY),
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 14 DAY
                                 AND occurred_at < {NOW} - INTERVAL 7 DAY),
-            100.0 * COUNT(*) FILTER (WHERE latitude IS NULL) / COUNT(*)
+            100.0 * COUNT(*) FILTER (WHERE latitude IS NULL) / GREATEST(COUNT(*), 1),
+            CAST(MIN(CAST(occurred_at AS DATE)) AS VARCHAR)
         FROM marts.fct_incidents
     """).fetchone()
     top_category_row = con.execute(f"""
@@ -66,6 +79,8 @@ def _summary(con) -> dict:
         "sources_active": [j for j, _ in by_source],
         "total_records": total,
         "records_by_jurisdiction": {j: n for j, n in by_source},
+        "data_start_date": data_start,
+        "incident_window_days": INCIDENT_WINDOW_DAYS,
         "new_incidents_24h": new_24h,
         "new_incidents_48h": new_48h,
         "today_count": today_count,
@@ -78,55 +93,47 @@ def _summary(con) -> dict:
     }
 
 
-def _incidents_geojson(con) -> dict:
-    rows = _rows_as_dicts(con, f"""
+def _incidents(con) -> dict:
+    rows = con.execute(f"""
         SELECT
-            incident_key, jurisdiction, offense_raw, offense_category,
-            severity_weight, strftime(occurred_at, '%Y-%m-%dT%H:%M:%S') AS occurred_at,
-            case_number, area_name, block_address, latitude, longitude
+            incident_key, jurisdiction, offense_category, severity_weight,
+            offense_raw, strftime(occurred_at, '%Y-%m-%dT%H:%M:%S') AS occurred_at,
+            block_address, area_name, city, case_number,
+            ROUND(latitude, 6) AS latitude, ROUND(longitude, 6) AS longitude
         FROM marts.fct_incidents
         WHERE occurred_at >= {NOW} - INTERVAL {INCIDENT_WINDOW_DAYS} DAY
-          AND latitude IS NOT NULL AND longitude IS NOT NULL
-    """)
-    features = []
-    for record in rows:
-        lat, lon = record.pop("latitude"), record.pop("longitude")
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": record,
-        })
-    return {"type": "FeatureCollection", "features": features}
+          AND occurred_at <= {NOW} + INTERVAL 1 DAY
+        ORDER BY occurred_at DESC
+    """).fetchall()
+    return {
+        "window_days": INCIDENT_WINDOW_DAYS,
+        "columns": INCIDENT_COLUMNS,
+        "rows": [list(r) for r in rows],
+    }
 
 
-def _trends_daily(con) -> list[dict]:
-    return _rows_as_dicts(con, f"""
-        SELECT jurisdiction, CAST(occurred_date AS VARCHAR) AS date, SUM(incident_count) AS count
-        FROM marts.daily_counts
-        WHERE occurred_date >= current_date - {TREND_WINDOW_DAYS}
-        GROUP BY 1, 2
-        ORDER BY 2, 1
-    """)
-
-
-def _trends_category(con) -> list[dict]:
-    return _rows_as_dicts(con, f"""
+def _trends(con) -> dict:
+    # occurred_at sanity bounds guard against source-side typo dates
+    # (year 1900 or 2216) polluting the aggregates.
+    rows = con.execute("""
         SELECT
+            CAST(occurred_date AS VARCHAR) AS date,
             jurisdiction, offense_category,
-            COALESCE(SUM(incident_count) FILTER (
-                WHERE occurred_date >= current_date - {CATEGORY_WINDOW_DAYS}), 0) AS count,
-            COALESCE(SUM(incident_count) FILTER (
-                WHERE occurred_date >= current_date - 2 * {CATEGORY_WINDOW_DAYS}
-                  AND occurred_date < current_date - {CATEGORY_WINDOW_DAYS}), 0) AS prev_count
+            SUM(incident_count) AS count
         FROM marts.daily_counts
-        WHERE occurred_date >= current_date - 2 * {CATEGORY_WINDOW_DAYS}
-        GROUP BY 1, 2
-        ORDER BY 3 DESC
-    """)
+        WHERE occurred_date >= DATE '2016-01-01'
+          AND occurred_date <= current_date
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+    """).fetchall()
+    return {
+        "columns": ["date", "jurisdiction", "offense_category", "count"],
+        "rows": [list(r) for r in rows],
+    }
 
 
-def _trends_heatmap(con) -> list[dict]:
-    return _rows_as_dicts(con, f"""
+def _heatmap(con) -> dict:
+    rows = con.execute(f"""
         SELECT
             dayofweek(occurred_at) AS weekday,
             hour(occurred_at)      AS hour,
@@ -135,7 +142,12 @@ def _trends_heatmap(con) -> list[dict]:
         WHERE occurred_at >= {NOW} - INTERVAL {HEATMAP_WINDOW_DAYS} DAY
         GROUP BY 1, 2
         ORDER BY 1, 2
-    """)
+    """).fetchall()
+    return {
+        "window_days": HEATMAP_WINDOW_DAYS,
+        "columns": ["weekday", "hour", "count"],
+        "rows": [list(r) for r in rows],
+    }
 
 
 def run() -> None:
@@ -143,10 +155,9 @@ def run() -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
 
     _write_json("summary.json", _summary(con))
-    _write_json("incidents.geojson", _incidents_geojson(con))
-    _write_json("trends_daily.json", _trends_daily(con))
-    _write_json("trends_category.json", _trends_category(con))
-    _write_json("trends_heatmap.json", _trends_heatmap(con))
+    _write_json("incidents.json", _incidents(con))
+    _write_json("trends.json", _trends(con))
+    _write_json("heatmap.json", _heatmap(con))
 
     con.close()
     logger.info("Site data export complete")
