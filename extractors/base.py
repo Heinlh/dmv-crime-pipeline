@@ -13,13 +13,13 @@ Responsibilities:
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import requests
 
-from config import INITIAL_LOOKBACK_DAYS, RAW_DIR, STATE_PATH
+from config import BACKFILL_START, RAW_DIR, STATE_PATH
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -27,14 +27,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 # ---------------------------------------------------------------- state
 
 def read_watermark(source_name: str) -> datetime:
-    """Return the last high-water mark for a source, or the initial
-    lookback window if this is the first run."""
+    """Return the last high-water mark for a source, or the full-history
+    backfill start if this is the first run (no watermark yet)."""
     if STATE_PATH.exists():
         state = json.loads(STATE_PATH.read_text())
         raw = state.get(source_name)
         if raw:
             return datetime.fromisoformat(raw)
-    return datetime.now(timezone.utc) - timedelta(days=INITIAL_LOOKBACK_DAYS)
+    return BACKFILL_START
 
 
 def write_watermark(source_name: str, value: datetime) -> None:

@@ -1,10 +1,13 @@
 """DC (MPD) crime extractor.
 
 Source: Open Data DC, Crime Incidents feature layers on the MPD FEEDS
-FeatureServer. DC publishes one layer per calendar year (2026 is layer
-41), so the extractor queries every configured layer whose year falls
-inside the extraction window. Attributes already include block-level
-LATITUDE/LONGITUDE, so geometry is not requested.
+FeatureServer. DC publishes one "Crime Incidents in YYYY" layer per
+calendar year, so the extractor first asks the FeatureServer for its
+layer listing and builds the year -> layer id map from the layer names
+(falling back to the ids pinned in config if that request fails), then
+queries every year layer that falls inside the extraction window.
+Attributes already include block-level LATITUDE/LONGITUDE, so geometry
+is not requested.
 
 Incremental strategy: filter on REPORT_DAT (epoch milliseconds) greater
 than the stored watermark, page with resultOffset ordered by REPORT_DAT,
@@ -13,6 +16,7 @@ dedupe approach as the Montgomery County extractor.
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from config import DC
@@ -21,6 +25,26 @@ from extractors.base import land_raw, make_session, read_watermark, request_json
 logger = logging.getLogger("dc")
 
 OVERLAP_HOURS = 24
+
+LAYER_NAME_PATTERN = re.compile(r"Crime Incidents in (\d{4})", re.IGNORECASE)
+
+
+def discover_year_layers(session) -> dict[int, int]:
+    """Build {year: layer_id} from the FeatureServer's own layer listing."""
+    try:
+        payload = request_json(session, DC["base_url"], params={"f": "json"})
+        layers = {}
+        for layer in payload.get("layers", []):
+            match = LAYER_NAME_PATTERN.search(layer.get("name", ""))
+            if match:
+                layers[int(match.group(1))] = layer["id"]
+        if layers:
+            logger.info("Discovered %d year layers: %s", len(layers), sorted(layers))
+            return layers
+        logger.warning("Layer discovery returned no crime layers; using config fallback")
+    except Exception:
+        logger.exception("Layer discovery failed; using config fallback")
+    return DC["fallback_year_layers"]
 
 
 def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
@@ -54,12 +78,13 @@ def extract() -> list[dict]:
     watermark = read_watermark(DC["source_name"]) - timedelta(hours=OVERLAP_HOURS)
     logger.info("Pulling DC incidents with REPORT_DAT > %s", watermark.isoformat())
 
+    year_layers = discover_year_layers(session)
     current_year = datetime.now(timezone.utc).year
-    years_in_window = [y for y in DC["year_layers"] if watermark.year <= y <= current_year]
+    years_in_window = [y for y in year_layers if watermark.year <= y <= current_year]
 
     records: list[dict] = []
     for year in sorted(years_in_window):
-        records.extend(_query_layer(session, DC["year_layers"][year], watermark))
+        records.extend(_query_layer(session, year_layers[year], watermark))
 
     if records:
         max_millis = max(r[DC["watermark_field"]] for r in records if r.get(DC["watermark_field"]))
