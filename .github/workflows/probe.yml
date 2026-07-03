@@ -1,0 +1,23 @@
+name: Probe a data source
+
+# Reconnaissance helper for adding new jurisdictions: fetches a URL from
+# the Actions runner (which has open egress, unlike local sandboxes) and
+# prints the response head to the log, so a new source's schema or an
+# ArcGIS service listing can be inspected without guessing. Manual only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL to fetch (e.g. an ArcGIS ?f=json listing or a Socrata /api/views/<id>.json)"
+        required: true
+        type: string
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch and print response head
+        run: |
+          curl -sSL --max-time 60 "${{ inputs.url }}" | head -c 20000

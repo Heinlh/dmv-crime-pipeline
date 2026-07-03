@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Brief - DMV Crime Watch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%234de3ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="pulse" aria-hidden="true"></span>DMV<span class="tag">//</span>CRIME WATCH</a>
+  <div class="links">
+    <a class="link" href="index.html">Map</a>
+    <a class="link" href="trends.html">Trends</a>
+    <a class="link" href="events.html">Events</a>
+    <a class="link active" href="daily.html">Daily Brief</a>
+    <a class="link" href="alerts.html">Alerts</a>
+    <a class="link" href="about.html">About</a>
+  </div>
+</nav>
+<main>
+  <p class="kicker">Daily brief // latest data day</p>
+  <h1>Daily Brief</h1>
+  <p class="subtitle" id="brief-date">Loading the latest data day...</p>
+
+  <div class="panel">
+    <h2>What happened</h2>
+    <ul class="legend-notes" id="bullets"></ul>
+  </div>
+
+  <div class="panel">
+    <h2>Categories on the latest day</h2>
+    <div class="chart-wrap"><canvas id="chart-day-categories"></canvas></div>
+    <p class="chart-caption" id="caption-day-categories"></p>
+  </div>
+
+  <div class="panel">
+    <h2>The last 14 days</h2>
+    <div class="chart-wrap"><canvas id="chart-last14"></canvas></div>
+    <p class="chart-caption" id="caption-last14"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Most serious incidents of the day</h2>
+    <p class="heatmap-subtitle">Ranked by this project's severity weighting; every detail below comes from the agency's published record.</p>
+    <div id="notable" class="event-grid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Get this in your inbox</h2>
+    <p>A daily email with this brief is available. <a href="alerts.html">Sign up on the Alerts page</a>.</p>
+  </div>
+
+  <footer class="data-note">
+    "Latest data day" is the most recent day with published reports; both
+    agencies publish with a lag of one or more days, and Prince George's
+    County updates weekly, so the newest day is typically one or more days
+    ago and can still change as corrections arrive.
+    <a href="privacy.html">Privacy</a>
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/daily.js"></script>
+</body>
+</html>

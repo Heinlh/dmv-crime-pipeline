@@ -85,8 +85,24 @@ dc_records = [
      "SHIFT": "EVENING", "LATITUDE": "38.9002", "LONGITUDE": "-76.9895", "OBJECTID": "3"},
 ]
 
+# PG County: the two records deliberately use different column-name
+# generations (clearance_code_inc_type/street_address vs offense/location)
+# to prove the coalescing transform handles both.
+pgc_records = [
+    {"incident_case_id": "PGC0001", "date": _iso(RECENT_B),
+     "clearance_code_inc_type": "THEFT FROM AUTO",
+     "street_address": "7700 BLK LANDOVER RD", "city": "LANDOVER",
+     "zip_code": "20785", "pgpd_sector": "H",
+     "latitude": "38.9340", "longitude": "-76.8721"},
+    {"incident_case_id": "PGC0002", "date": _iso(RECENT_B),
+     "offense": "HOMICIDE", "location": "6300 BLK MARLBORO PIKE",
+     "city": "DISTRICT HEIGHTS", "pgpd_beat": "K1",
+     "latitude": "38.8570", "longitude": "-76.8880"},
+]
+
 land_raw(moco_records, "moco")
 land_raw(dc_records, "dc")
+land_raw(pgc_records, "pgc")
 load_duckdb.run()
 load_duckdb.run()  # second run proves idempotency (no duplicate keys)
 export_site_data.run()
@@ -102,7 +118,7 @@ print("\n--- daily_counts ---")
 print(con.execute("SELECT * FROM marts.daily_counts ORDER BY occurred_date").df().to_string(index=False))
 
 n = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
-assert n == 7, f"expected 7 unique incidents, got {n}"
+assert n == 9, f"expected 9 unique incidents, got {n}"
 dup = con.execute("SELECT occurred_at FROM marts.fct_incidents WHERE incident_key='moco-201234567'").fetchone()[0]
 assert str(dup).startswith(RECENT_A_FIX.strftime("%Y-%m-%d %H:%M")), "dedupe should keep the latest version"
 geo = con.execute("SELECT latitude FROM marts.fct_incidents WHERE incident_key='dc-26098766'").fetchone()[0]
@@ -119,6 +135,8 @@ expected_categories = {
     "dc-26098765": "violent",       # ROBBERY
     "dc-26098766": "vehicle",       # THEFT F/AUTO
     "dc-26098767": "sexual",        # SEX ABUSE
+    "pgc-PGC0001": "vehicle",       # THEFT FROM AUTO (new-gen columns)
+    "pgc-PGC0002": "homicide",      # HOMICIDE (old-gen columns, coalesced)
 }
 for key, expected in expected_categories.items():
     assert categories[key] == expected, f"{key}: expected {expected}, got {categories[key]}"
@@ -129,10 +147,16 @@ incidents = json.loads((SITE_DATA_DIR / "incidents.json").read_text())
 trends = json.loads((SITE_DATA_DIR / "trends.json").read_text())
 heatmap = json.loads((SITE_DATA_DIR / "heatmap.json").read_text())
 
-assert summary["total_records"] == 7
+assert summary["total_records"] == 9
 assert summary["data_start_date"] == "2016-08-15", summary["data_start_date"]
 assert heatmap["rows"], "heatmap should have rows"
 assert heatmap["columns"] == ["weekday", "hour", "jurisdiction", "offense_category", "count"], heatmap["columns"]
+
+digest = json.loads((SITE_DATA_DIR / "digest.json").read_text())
+assert digest["latest_day"], "digest must identify the latest data day"
+assert digest["bullets"] and any("incidents were reported" in b for b in digest["bullets"]), digest["bullets"]
+assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc"}
+assert digest["notable"], "digest should list notable incidents"
 
 keys = {row[incidents["columns"].index("incident_key")] for row in incidents["rows"]}
 assert "moco-160000001" not in keys, "2016 record must be outside the incident window"

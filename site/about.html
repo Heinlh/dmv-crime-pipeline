@@ -17,6 +17,8 @@
     <a class="link" href="index.html">Map</a>
     <a class="link" href="trends.html">Trends</a>
     <a class="link" href="events.html">Events</a>
+    <a class="link" href="daily.html">Daily Brief</a>
+    <a class="link" href="alerts.html">Alerts</a>
     <a class="link active" href="about.html">About</a>
   </div>
 </nav>
@@ -29,14 +31,19 @@
     <h2>What is this?</h2>
     <p>
       DMV Crime Watch pulls official, public crime reports for the DMV
-      area, currently <strong>Washington DC</strong> and
-      <strong>Montgomery County, MD</strong>, into one place, refreshed
-      automatically every day. The <a href="index.html">Map</a> shows where
-      recent incidents happened, <a href="trends.html">Trends</a> shows how
-      activity has changed over any period back to 2016, and
+      area, currently <strong>Washington DC</strong>,
+      <strong>Montgomery County, MD</strong>, and
+      <strong>Prince George's County, MD</strong>, into one place,
+      refreshed automatically every day. The <a href="index.html">Map</a>
+      shows where recent incidents happened, <a href="trends.html">Trends</a>
+      shows how activity has changed over any period back to 2016,
       <a href="events.html">Events</a> lets you search individual reports
-      from the last 90 days. More jurisdictions (Prince George's County,
-      Northern Virginia) are on the roadmap.
+      from the last 90 days, and the <a href="daily.html">Daily Brief</a>
+      summarizes the latest data day (also available
+      <a href="alerts.html">by email</a>). Northern Virginia is on the
+      roadmap: Fairfax County publishes usable open data we plan to add;
+      Arlington County stopped publishing machine-readable incident data
+      in 2022, so it can't be included until the county resumes.
     </p>
   </div>
 
@@ -49,16 +56,21 @@
       <li><strong>Washington DC:</strong> MPD Crime Incidents feature
         layers on Open Data DC, one layer per calendar year. Coordinates
         are anonymized to the block by MPD.</li>
-      <li>Both agencies publish with a lag of one or more days, so this
-        site says <strong>"as of last published data," never "live."</strong></li>
+      <li><strong>Prince George's County:</strong> the OpenPGC Crime
+        Incidents datasets (2017 to present). The county updates this
+        data <strong>weekly</strong>, so PG County incidents trail the
+        daily sources by up to a week. Addresses are rounded to the
+        block by the county.</li>
+      <li>Every agency publishes with a lag, so this site says
+        <strong>"as of last published data," never "live."</strong></li>
     </ul>
   </div>
 
   <div class="panel">
     <h2>How it works</h2>
     <p>
-      Two Python extractors pull incident-level records from each agency's
-      public API every morning. Each extractor is incremental: it tracks a
+      One Python extractor per jurisdiction pulls incident-level records
+      from each agency's public API every morning. Each extractor is incremental: it tracks a
       per-source watermark and re-pulls a 24 hour overlap window to catch
       late agency corrections. Raw API responses land untouched as parquet,
       so the warehouse can always be rebuilt from the landing zone.
@@ -103,6 +115,7 @@
     a raw parquet landing zone, a DuckDB warehouse with a unified
     cross-jurisdiction taxonomy, and a dependency-free static front end,
     refreshed daily by GitHub Actions.
+   &middot; <a href="privacy.html">Privacy policy</a>
   </footer>
 </main>
 </body>
