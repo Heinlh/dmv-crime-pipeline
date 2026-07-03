@@ -64,8 +64,10 @@
       A DuckDB warehouse then rebuilds its raw tables, dedupes on each
       source's incident id (keeping the latest version), standardizes
       timestamps and locations, and maps each jurisdiction's offense labels
-      into one shared taxonomy: violent, property, vehicle, drug/alcohol,
-      public disorder, other. The result is one relational fact table,
+      into one shared taxonomy: homicide/fatal violence, violent crime,
+      sexual offenses, property crime, vehicle-related crime,
+      drug/alcohol/disorder, and other/unknown. The result is one
+      relational fact table,
       <code>marts.fct_incidents</code>, one row per incident, upserted
       idempotently on a global incident key. A final export step snapshots
       the warehouse into the static JSON this site reads, and GitHub

@@ -30,7 +30,8 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   `incidents.json` incident-level last 90 days in columnar form (feeds
   the map and events search), `trends.json` daily counts by jurisdiction
   and category over the full history (feeds any trends period back to
-  2016), `heatmap.json` weekday x hour last 90 days
+  2016), `heatmap.json` weekday x hour x jurisdiction x category last
+  90 days (the site folds hours into dayparts)
 - `site/` static HTML/CSS/JS (Leaflet + markercluster + Chart.js via CDN,
   no build step, no framework) reading `site/data/`; four pages (Map =
   index, Trends, Events, About), nav repeated per page. Dark-only
@@ -53,9 +54,12 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   INSERT OR REPLACE on incident_key ('{jurisdiction}-{source_id}').
 - Locations stay block-level as published. Failed geocodes become NULL,
   never guessed or sharpened.
-- Unified taxonomy: violent, property, vehicle, drug, society, other,
-  with severity_weight 1 to 10. DC maps via dim_offense_map (closed set
-  of nine offenses); MoCo maps via keyword rules in transform.sql.
+- Unified taxonomy: homicide, violent, sexual, property, vehicle,
+  disorder, other, with severity_weight 1 to 10. DC maps via
+  dim_offense_map (closed set of nine offenses); MoCo maps via keyword
+  rules in transform.sql. Display metadata (labels, colors,
+  descriptions, examples) lives ONLY in site/js/common.js CATEGORIES
+  (CSS variables in site/css/style.css mirror the colors).
 - No em dashes in any prose, docs, or comments.
 - Requires SOCRATA_APP_TOKEN env var for reasonable MoCo rate limits.
 

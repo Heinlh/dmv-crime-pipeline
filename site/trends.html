@@ -44,6 +44,18 @@
         <button data-gran="month" class="active">MONTH</button>
       </span>
     </label>
+    <label>Jurisdiction
+      <select id="f-jurisdiction">
+        <option value="">All</option>
+        <option value="dc">Washington DC</option>
+        <option value="moco">Montgomery County</option>
+      </select>
+    </label>
+    <label>Category
+      <select id="f-category">
+        <option value="">All</option>
+      </select>
+    </label>
     <span class="result-count" id="period-readout"></span>
   </div>
 
@@ -72,11 +84,15 @@
 
   <div class="panel">
     <h2>When are incidents most commonly reported?</h2>
-    <div id="heatmap" class="heatmap-grid"></div>
-    <p class="chart-caption" id="caption-heatmap">
-      Fixed to the last 90 days (this view needs incident-level timestamps,
-      which the site only ships for the recent window). Darker cells mean
-      more reported incidents.
+    <p class="heatmap-subtitle">Darker boxes show days and times with more reported incidents.</p>
+    <div id="heatmap" class="heatmap-grid" role="table" aria-label="Reported incidents by day of week and time of day"></div>
+    <p class="chart-caption" id="caption-heatmap"></p>
+    <p class="chart-caption" id="heatmap-note">
+      Based on the last 90 days of reports (the jurisdiction and category
+      filters above apply; the time period picker does not, since this view
+      needs incident-level timestamps the site only ships for the recent
+      window). Times reflect when the offense occurred as reported by the
+      agency.
     </p>
   </div>
 

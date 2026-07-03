@@ -19,13 +19,15 @@
   --accent-dim: #2a9dcf;
   --accent-glow: rgba(94, 200, 242, 0.35);
 
-  /* unified crime taxonomy (validated, dark mode) */
-  --violent: #e66767;
-  --property: #c98500;
-  --vehicle: #8b7ff2;
-  --drug: #1fa877;
-  --society: #2a9dcf;
-  --other: #8a93a3;
+  /* unified crime taxonomy (single source of truth: site/js/common.js
+     CATEGORIES -- keep these values in sync with it) */
+  --homicide: #cd3a3a;
+  --violent: #bf4f00;
+  --sexual: #aa6ad1;
+  --property: #0072B2;
+  --vehicle: #009E73;
+  --disorder: #c98500;
+  --other: #8A8A8A;
 
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -363,8 +365,12 @@ nav.topnav a.link.active {
 
 /* --------------------------------------------------------- badges */
 
+/* Badge text stays in high-contrast ink; the colored dot and border
+   carry category identity (never color alone -- the text IS the label). */
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
   padding: 0.08rem 0.55rem;
   border-radius: 999px;
   font-family: var(--mono);
@@ -372,15 +378,25 @@ nav.topnav a.link.active {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  border: 1px solid;
+  color: var(--text);
+  border: 1px solid var(--badge-c, var(--other));
   background: transparent;
 }
-.badge.violent  { color: var(--violent);  border-color: var(--violent); }
-.badge.property { color: var(--property); border-color: var(--property); }
-.badge.vehicle  { color: var(--vehicle);  border-color: var(--vehicle); }
-.badge.drug     { color: var(--drug);     border-color: var(--drug); }
-.badge.society  { color: var(--society);  border-color: var(--society); }
-.badge.other    { color: var(--other);    border-color: var(--other); }
+.badge::before {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--badge-c, var(--other));
+  flex-shrink: 0;
+}
+.badge.homicide { --badge-c: var(--homicide); }
+.badge.violent  { --badge-c: var(--violent); }
+.badge.sexual   { --badge-c: var(--sexual); }
+.badge.property { --badge-c: var(--property); }
+.badge.vehicle  { --badge-c: var(--vehicle); }
+.badge.disorder { --badge-c: var(--disorder); }
+.badge.other    { --badge-c: var(--other); }
 
 /* --------------------------------------------------------- charts */
 
@@ -428,20 +444,41 @@ table.data-table th {
 
 /* --------------------------------------------------------- heatmap */
 
+/* Day-of-week x time-of-day heatmap: 4 dayparts, count labeled in every
+   cell so the reading never relies on color alone. */
 .heatmap-grid {
   display: grid;
-  grid-template-columns: 3.2rem repeat(24, 1fr);
-  gap: 2px;
+  grid-template-columns: minmax(3.2rem, 5.5rem) repeat(4, 1fr);
+  gap: 3px;
   font-family: var(--mono);
-  font-size: 0.6rem;
 }
 .heatmap-grid .row-label, .heatmap-grid .col-label {
   color: var(--muted);
+  font-size: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.heatmap-grid .row-label { align-items: flex-end; padding-right: 0.5rem; }
+.heatmap-grid .col-label .hint { font-size: 0.6rem; color: var(--muted); opacity: 0.8; }
+.heatmap-cell {
+  border-radius: 3px;
+  min-height: 2.3rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
 }
-.heatmap-cell { border-radius: 2px; min-height: 1.05rem; }
+.heatmap-subtitle { color: var(--text-2); font-size: 0.84rem; margin: 0 0 0.75rem; }
+@media (max-width: 640px) {
+  .heatmap-grid { grid-template-columns: 2.6rem repeat(4, 1fr); }
+  .heatmap-cell { min-height: 2rem; font-size: 0.68rem; }
+  .heatmap-grid .col-label .hint { display: none; }
+}
 
 /* ------------------------------------------------------ events page */
 
@@ -461,11 +498,12 @@ table.data-table th {
   transition: border-color 0.15s, transform 0.15s;
 }
 .event-card:hover { border-color: var(--accent-dim); border-left-width: 3px; }
+.event-card.homicide { border-left-color: var(--homicide); }
 .event-card.violent  { border-left-color: var(--violent); }
+.event-card.sexual   { border-left-color: var(--sexual); }
 .event-card.property { border-left-color: var(--property); }
 .event-card.vehicle  { border-left-color: var(--vehicle); }
-.event-card.drug     { border-left-color: var(--drug); }
-.event-card.society  { border-left-color: var(--society); }
+.event-card.disorder { border-left-color: var(--disorder); }
 
 .event-card .head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
 .event-card .when { font-family: var(--mono); font-size: 0.72rem; color: var(--accent); }

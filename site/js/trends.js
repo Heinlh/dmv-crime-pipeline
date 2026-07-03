@@ -16,10 +16,22 @@ Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 // --------------------------------------------------------- state
 
 let rows = [];          // [{date: "YYYY-MM-DD", jurisdiction, category, count}]
+let heatmapPayload = null;
 let minDate = "2016-07-01";
 let maxDate = null;
-const state = { from: null, to: null, granularity: "month" };
+const state = { from: null, to: null, granularity: "month", jurisdiction: "", category: "" };
 const charts = {};      // canvas id -> Chart instance
+
+// Dayparts for the "when are incidents reported" heatmap. Night wraps
+// past midnight; each hour is attributed to its own calendar day.
+const DAYPARTS = [
+  { label: "Morning", hint: "6 AM-12 PM", hours: [6, 7, 8, 9, 10, 11] },
+  { label: "Afternoon", hint: "12-5 PM", hours: [12, 13, 14, 15, 16] },
+  { label: "Evening", hint: "5-10 PM", hours: [17, 18, 19, 20, 21] },
+  { label: "Night", hint: "10 PM-6 AM", hours: [22, 23, 0, 1, 2, 3, 4, 5] },
+];
+// Display rows Monday..Sunday; the export's weekday uses 0 = Sunday.
+const DAY_ROWS = [1, 2, 3, 4, 5, 6, 0];
 
 // --------------------------------------------------- date helpers
 
@@ -117,7 +129,10 @@ function onCustomRange() {
 // ------------------------------------------------------ aggregation
 
 function sliceRows() {
-  return rows.filter(r => r.date >= state.from && r.date <= state.to);
+  return rows.filter(r =>
+    r.date >= state.from && r.date <= state.to &&
+    (!state.jurisdiction || r.jurisdiction === state.jurisdiction) &&
+    (!state.category || r.category === state.category));
 }
 
 // Sum counts into {bucket -> {group -> count}} for a grouping function.
@@ -173,7 +188,7 @@ function renderPeriodCards(slice) {
 function renderVolume(slice) {
   const buckets = enumerateBuckets(state.from, state.to, state.granularity);
   const byBucket = aggregate(slice, r => r.jurisdiction);
-  const jurisdictions = ["dc", "moco"];
+  const jurisdictions = state.jurisdiction ? [state.jurisdiction] : ["dc", "moco"];
 
   const datasets = jurisdictions.map(j => ({
     label: jurisdictionLabel(j),
@@ -193,7 +208,7 @@ function renderVolume(slice) {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { boxWidth: 18, boxHeight: 2 } } },
+      plugins: { legend: { display: jurisdictions.length > 1, labels: { boxWidth: 18, boxHeight: 2 } } },
       scales: {
         x: { ticks: { maxTicksLimit: 12, maxRotation: 0 }, grid: { display: false } },
         y: { beginAtZero: true, grid: { color: CHART_GRID } },
@@ -204,23 +219,27 @@ function renderVolume(slice) {
   // caption: the peak bucket
   let peakIdx = -1, peakTotal = -1;
   buckets.forEach((b, i) => {
-    const t = (datasets[0].data[i] || 0) + (datasets[1].data[i] || 0);
+    const t = datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0);
     if (t > peakTotal) { peakTotal = t; peakIdx = i; }
   });
-  document.getElementById("caption-volume").textContent = peakIdx >= 0
+  const scopeText = state.jurisdiction ? `in ${jurisdictionLabel(state.jurisdiction)}` : "across both jurisdictions";
+  document.getElementById("caption-volume").textContent = peakIdx >= 0 && peakTotal > 0
     ? `Volume peaked ${state.granularity === "day" ? "on" : "in"} ${bucketLabel(buckets[peakIdx], state.granularity)} ` +
-      `with ${peakTotal.toLocaleString()} reported incidents across both jurisdictions.`
-    : "No incidents in the selected period.";
+      `with ${peakTotal.toLocaleString()} reported incidents ${scopeText}.`
+    : "No incidents match the selected filters.";
 
   // table view twin
   const tbl = document.getElementById("volume-table");
   tbl.innerHTML = `<table class="data-table">
-    <thead><tr><th>Period</th><th class="num">DC</th><th class="num">MoCo</th><th class="num">Total</th></tr></thead>
-    <tbody>${buckets.map((b, i) => `
-      <tr><td>${esc(bucketLabel(b, state.granularity))}</td>
-      <td class="num">${(datasets[0].data[i] || 0).toLocaleString()}</td>
-      <td class="num">${(datasets[1].data[i] || 0).toLocaleString()}</td>
-      <td class="num">${((datasets[0].data[i] || 0) + (datasets[1].data[i] || 0)).toLocaleString()}</td></tr>`).join("")}
+    <thead><tr><th>Period</th>${jurisdictions.map(j =>
+      `<th class="num">${esc(jurisdictionLabel(j))}</th>`).join("")}<th class="num">Total</th></tr></thead>
+    <tbody>${buckets.map((b, i) => {
+      const vals = datasets.map(d => d.data[i] || 0);
+      const total = vals.reduce((sum, v) => sum + v, 0);
+      return `<tr><td>${esc(bucketLabel(b, state.granularity))}</td>
+        ${vals.map(v => `<td class="num">${v.toLocaleString()}</td>`).join("")}
+        <td class="num">${total.toLocaleString()}</td></tr>`;
+    }).join("")}
     </tbody></table>`;
 }
 
@@ -241,7 +260,10 @@ function renderCategory(slice) {
   const prevTo = toIso(new Date(parseDay(state.from).getTime() - dayMs));
   const prevCovered = prevFrom >= minDate;
   const prevTotals = prevCovered
-    ? totalsBy(rows.filter(r => r.date >= prevFrom && r.date <= prevTo), r => r.category)
+    ? totalsBy(rows.filter(r =>
+        r.date >= prevFrom && r.date <= prevTo &&
+        (!state.jurisdiction || r.jurisdiction === state.jurisdiction) &&
+        (!state.category || r.category === state.category)), r => r.category)
     : {};
 
   document.getElementById("category-cards").innerHTML = cats.map(cat => {
@@ -298,41 +320,65 @@ function renderCategory(slice) {
       `(${(totals[top] || 0).toLocaleString()} incidents). Hover a bar for the DC / Montgomery County split.`
     : "No incidents in the selected period.";
 
+  const tableJurs = state.jurisdiction ? [state.jurisdiction] : ["dc", "moco"];
   const tbl = document.getElementById("category-table");
   tbl.innerHTML = `<table class="data-table">
-    <thead><tr><th>Category</th><th class="num">DC</th><th class="num">MoCo</th><th class="num">Total</th></tr></thead>
+    <thead><tr><th>Category</th>${tableJurs.map(j =>
+      `<th class="num">${esc(jurisdictionLabel(j))}</th>`).join("")}<th class="num">Total</th></tr></thead>
     <tbody>${cats.map(c => `
       <tr><td>${esc(CATEGORY_LABELS[c])}</td>
-      <td class="num">${(byJurCat[`dc|${c}`] || 0).toLocaleString()}</td>
-      <td class="num">${(byJurCat[`moco|${c}`] || 0).toLocaleString()}</td>
+      ${tableJurs.map(j => `<td class="num">${(byJurCat[`${j}|${c}`] || 0).toLocaleString()}</td>`).join("")}
       <td class="num">${(totals[c] || 0).toLocaleString()}</td></tr>`).join("")}
     </tbody></table>`;
 }
 
-function renderHeatmap(payload) {
+function renderHeatmap() {
+  if (!heatmapPayload) return;
   const grid = document.getElementById("heatmap");
-  const counts = new Map(payload.rows.map(([w, h, c]) => [`${w}|${h}`, c]));
-  const max = Math.max(1, ...payload.rows.map(r => r[2]));
 
-  let html = `<div></div>`;
-  for (let h = 0; h < 24; h++) html += `<div class="col-label">${h}</div>`;
+  // Sum weekday x hour counts (filtered by jurisdiction/category) into
+  // a 7-day x 4-daypart grid.
+  const hourToDaypart = {};
+  DAYPARTS.forEach((dp, i) => dp.hours.forEach(h => { hourToDaypart[h] = i; }));
+  const cells = Array.from({ length: 7 }, () => [0, 0, 0, 0]);
+  for (const [weekday, hour, jurisdiction, category, count] of heatmapPayload.rows) {
+    if (state.jurisdiction && jurisdiction !== state.jurisdiction) continue;
+    if (state.category && category !== state.category) continue;
+    cells[weekday][hourToDaypart[hour]] += count;
+  }
+  const max = Math.max(1, ...cells.flat());
 
-  let peak = { dow: 0, hour: 0, count: -1 };
-  for (let dow = 0; dow < 7; dow++) {
+  let html = `<div></div>` + DAYPARTS.map(dp =>
+    `<div class="col-label">${dp.label}<span class="hint">${dp.hint}</span></div>`).join("");
+
+  let peak = { dow: 1, part: 0, count: -1 };
+  let quiet = { dow: 1, part: 0, count: Infinity };
+  for (const dow of DAY_ROWS) {
     html += `<div class="row-label">${WEEKDAYS[dow]}</div>`;
-    for (let h = 0; h < 24; h++) {
-      const count = counts.get(`${dow}|${h}`) || 0;
-      if (count > peak.count) peak = { dow, hour: h, count };
+    DAYPARTS.forEach((dp, part) => {
+      const count = cells[dow][part];
+      if (count > peak.count) peak = { dow, part, count };
+      if (count < quiet.count) quiet = { dow, part, count };
       const intensity = count / max;
       const bg = `rgba(94, 200, 242, ${0.05 + intensity * 0.85})`;
-      html += `<div class="heatmap-cell" title="${WEEKDAYS[dow]} ${h}:00 - ${count} incidents" style="background:${bg}"></div>`;
-    }
+      const ink = intensity > 0.55 ? "#0a0e14" : "var(--text)";
+      const readout = `${WEEKDAYS_FULL[dow]} ${dp.label.toLowerCase()} (${dp.hint}): ${count.toLocaleString()} reported incidents`;
+      html += `<div class="heatmap-cell" role="img" tabindex="0" aria-label="${readout}"
+        title="${readout}" style="background:${bg};color:${ink}">${count.toLocaleString()}</div>`;
+    });
   }
   grid.innerHTML = html;
 
-  document.getElementById("caption-heatmap").textContent =
-    `Fixed to the last ${payload.window_days} days. Darker cells mean more reported incidents; ` +
-    `the busiest slot is around ${peak.hour}:00 on ${WEEKDAYS_FULL[peak.dow]}s.`;
+  const caption = document.getElementById("caption-heatmap");
+  if (peak.count <= 0) {
+    caption.textContent = "No reported incidents match these filters in the last 90 days.";
+    return;
+  }
+  const peakPart = DAYPARTS[peak.part], quietPart = DAYPARTS[quiet.part];
+  caption.textContent =
+    `Reported incidents were most common on ${WEEKDAYS_FULL[peak.dow]} ${peakPart.label.toLowerCase()}s ` +
+    `(${peakPart.hint}, ${peak.count.toLocaleString()} incidents). The quietest period was ` +
+    `${WEEKDAYS_FULL[quiet.dow]} ${quietPart.label.toLowerCase()}s (${quietPart.hint}, ${quiet.count.toLocaleString()}).`;
 }
 
 function renderAll() {
@@ -340,6 +386,7 @@ function renderAll() {
   renderPeriodCards(slice);
   renderVolume(slice);
   renderCategory(slice);
+  renderHeatmap();
 }
 
 // ------------------------------------------------------------ wiring
@@ -351,6 +398,22 @@ function wireControls() {
     b.addEventListener("click", () => { setGranularity(b.dataset.gran); renderAll(); }));
   document.getElementById("f-from").addEventListener("change", onCustomRange);
   document.getElementById("f-to").addEventListener("change", onCustomRange);
+
+  const categorySelect = document.getElementById("f-category");
+  for (const cat of CATEGORY_ORDER) {
+    const opt = document.createElement("option");
+    opt.value = cat;
+    opt.textContent = CATEGORY_LABELS[cat];
+    categorySelect.appendChild(opt);
+  }
+  document.getElementById("f-jurisdiction").addEventListener("change", e => {
+    state.jurisdiction = e.target.value;
+    renderAll();
+  });
+  categorySelect.addEventListener("change", e => {
+    state.category = e.target.value;
+    renderAll();
+  });
 
   for (const [btnId, tblId, chartSel] of [
     ["toggle-volume-table", "volume-table", "#chart-volume"],
@@ -377,13 +440,13 @@ async function init() {
     rows = trends.rows.map(([date, jurisdiction, category, count]) =>
       ({ date, jurisdiction, category, count }));
     if (!rows.length) throw new Error("trends.json is empty");
+    heatmapPayload = heatmap;
     minDate = rows[0].date;
     maxDate = rows[rows.length - 1].date;
     for (const el of ["f-from", "f-to"]) document.getElementById(el).max = maxDate.slice(0, 7);
 
     wireControls();
     applyPreset("all");
-    renderHeatmap(heatmap);
   } catch (err) {
     document.querySelector("main").insertAdjacentHTML("beforeend",
       `<p class="loading">Could not load trend data (${esc(err.message)}). Run the pipeline to generate site/data/.</p>`);
