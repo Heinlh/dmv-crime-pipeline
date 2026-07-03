@@ -109,7 +109,7 @@ function esc(value) {
 // addresses never touch this site or its repository. Set your Buttondown
 // username here after creating the account; while empty, the Alerts page
 // shows setup instructions instead of a form.
-const BUTTONDOWN_USERNAME = "";
+const BUTTONDOWN_USERNAME = "hhtet";
 
 // ----------------------------------------------------- data loading
 
