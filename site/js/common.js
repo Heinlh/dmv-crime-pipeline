@@ -5,7 +5,10 @@
 // values never reach the UI unlabeled.
 
 const JURISDICTION_LABELS = { dc: "Washington DC", moco: "Montgomery County" };
-const JURISDICTION_COLORS = { dc: "#2a9dcf", moco: "#cbd5e1" };
+// Line-chart series only: neon cyan vs magenta (the theme's primary and
+// secondary accents). Checked for colorblind separation (all-pairs CVD
+// deltaE 25+) and 3:1 contrast on the chart surface.
+const JURISDICTION_COLORS = { dc: "#4de3ff", moco: "#d17bff" };
 
 // Colors keep the requested hue per category (dark red, orange-red,
 // purple, blue, teal, amber, gray) with lightness adjusted where needed
