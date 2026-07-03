@@ -26,7 +26,10 @@ logger = logging.getLogger("dc")
 
 OVERLAP_HOURS = 24
 
-LAYER_NAME_PATTERN = re.compile(r"Crime Incidents in (\d{4})", re.IGNORECASE)
+# The service names its layers "Crime Incidents - 2026" today, but Open
+# Data DC has also published them as "Crime Incidents in 2026", so match
+# any separator between the phrase and the year.
+LAYER_NAME_PATTERN = re.compile(r"Crime Incidents\s*(?:-|in)?\s*(\d{4})", re.IGNORECASE)
 
 
 def discover_year_layers(session) -> dict[int, int]:
@@ -41,7 +44,10 @@ def discover_year_layers(session) -> dict[int, int]:
         if layers:
             logger.info("Discovered %d year layers: %s", len(layers), sorted(layers))
             return layers
-        logger.warning("Layer discovery returned no crime layers; using config fallback")
+        logger.warning(
+            "Layer discovery matched no crime layers; using config fallback. Layer names seen: %s",
+            [layer.get("name") for layer in payload.get("layers", [])][:40],
+        )
     except Exception:
         logger.exception("Layer discovery failed; using config fallback")
     return DC["fallback_year_layers"]
