@@ -38,15 +38,19 @@ SELECT
     COALESCE(crimename2, crimename3)                    AS offense_raw,
     CASE
         WHEN UPPER(crimename2) LIKE '%HOMICIDE%'
-          OR UPPER(crimename2) LIKE '%MURDER%'          THEN 'violent'
+          OR UPPER(crimename2) LIKE '%MURDER%'
+          OR UPPER(crimename2) LIKE '%MANSLAUGHTER%'    THEN 'homicide'
         WHEN UPPER(crimename2) LIKE '%RAPE%'
           OR UPPER(crimename2) LIKE '%SEX%'
-          OR UPPER(crimename2) LIKE '%FONDLING%'        THEN 'violent'
+          OR UPPER(crimename2) LIKE '%SODOMY%'
+          OR UPPER(crimename2) LIKE '%FONDLING%'        THEN 'sexual'
+        WHEN UPPER(crimename2) LIKE '%CARJACK%'         THEN 'vehicle'
         WHEN UPPER(crimename2) LIKE '%AGGRAVATED ASSAULT%' THEN 'violent'
         WHEN UPPER(crimename2) LIKE '%ROBBERY%'         THEN 'violent'
         WHEN UPPER(crimename2) LIKE '%ASSAULT%'
           OR UPPER(crimename2) LIKE '%INTIMIDATION%'
-          OR UPPER(crimename2) LIKE '%KIDNAP%'          THEN 'violent'
+          OR UPPER(crimename2) LIKE '%KIDNAP%'
+          OR UPPER(crimename2) LIKE '%WEAPON%'          THEN 'violent'
         WHEN UPPER(crimename2) LIKE '%ARSON%'           THEN 'property'
         WHEN UPPER(crimename2) LIKE '%BURGLARY%'        THEN 'property'
         WHEN UPPER(crimename2) LIKE '%MOTOR VEHICLE THEFT%' THEN 'vehicle'
@@ -59,21 +63,25 @@ SELECT
           OR UPPER(crimename2) LIKE '%VANDALISM%'
           OR UPPER(crimename2) LIKE '%DESTRUCTION%'     THEN 'property'
         WHEN UPPER(crimename2) LIKE '%DRUG%'
-          OR UPPER(crimename2) LIKE '%NARCOTIC%'        THEN 'drug'
-        WHEN UPPER(crimename2) LIKE '%WEAPON%'
-          OR UPPER(crimename2) LIKE '%PROSTITUTION%'
-          OR UPPER(crimename2) LIKE '%GAMBLING%'
+          OR UPPER(crimename2) LIKE '%NARCOTIC%'
           OR UPPER(crimename2) LIKE '%DUI%'
-          OR UPPER(crimename2) LIKE '%LIQUOR%'          THEN 'society'
+          OR UPPER(crimename2) LIKE '%LIQUOR%'
+          OR UPPER(crimename2) LIKE '%DISORDERLY%'
+          OR UPPER(crimename2) LIKE '%PROSTITUTION%'
+          OR UPPER(crimename2) LIKE '%GAMBLING%'        THEN 'disorder'
         ELSE 'other'
     END                                                 AS offense_category,
     CASE
         WHEN UPPER(crimename2) LIKE '%HOMICIDE%'
-          OR UPPER(crimename2) LIKE '%MURDER%'          THEN 10
+          OR UPPER(crimename2) LIKE '%MURDER%'
+          OR UPPER(crimename2) LIKE '%MANSLAUGHTER%'    THEN 10
         WHEN UPPER(crimename2) LIKE '%RAPE%'
-          OR UPPER(crimename2) LIKE '%SEX%'             THEN 9
+          OR UPPER(crimename2) LIKE '%SEX%'
+          OR UPPER(crimename2) LIKE '%SODOMY%'
+          OR UPPER(crimename2) LIKE '%FONDLING%'        THEN 9
         WHEN UPPER(crimename2) LIKE '%AGGRAVATED ASSAULT%' THEN 8
-        WHEN UPPER(crimename2) LIKE '%ROBBERY%'         THEN 7
+        WHEN UPPER(crimename2) LIKE '%ROBBERY%'
+          OR UPPER(crimename2) LIKE '%CARJACK%'         THEN 7
         WHEN UPPER(crimename2) LIKE '%ARSON%'           THEN 6
         WHEN UPPER(crimename2) LIKE '%ASSAULT%'
           OR UPPER(crimename2) LIKE '%KIDNAP%'
@@ -84,7 +92,10 @@ SELECT
           OR UPPER(crimename2) LIKE '%LARCENY%'
           OR UPPER(crimename2) LIKE '%FROM MOTOR VEHICLE%' THEN 3
         WHEN UPPER(crimename2) LIKE '%DRUG%'
-          OR UPPER(crimename2) LIKE '%NARCOTIC%'        THEN 2
+          OR UPPER(crimename2) LIKE '%NARCOTIC%'
+          OR UPPER(crimename2) LIKE '%DUI%'
+          OR UPPER(crimename2) LIKE '%LIQUOR%'
+          OR UPPER(crimename2) LIKE '%DISORDERLY%'      THEN 2
         ELSE 1
     END                                                 AS severity_weight,
     location                                            AS block_address,
