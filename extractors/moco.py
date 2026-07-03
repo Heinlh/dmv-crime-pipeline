@@ -25,7 +25,9 @@ OVERLAP_HOURS = 24  # re-pull a trailing day to catch late corrections
 
 def extract() -> list[dict]:
     session = make_session()
-    token = os.environ.get("SOCRATA_APP_TOKEN")
+    # strip() because a token pasted into the repo secret with stray
+    # whitespace (tab/newline) makes requests reject the header outright
+    token = os.environ.get("SOCRATA_APP_TOKEN", "").strip()
     if token:
         session.headers["X-App-Token"] = token
     else:

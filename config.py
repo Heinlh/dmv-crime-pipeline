@@ -42,6 +42,11 @@ DC = {
     "fallback_year_layers": {
         2026: 41,
         2025: 7,
+        2024: 6,
+        2023: 5,
+        2022: 4,
+        2021: 3,
+        2020: 2,
     },
     "watermark_field": "REPORT_DAT",  # esri epoch-millis timestamp
     "page_size": 1000,  # layer MaxRecordCount is 1000

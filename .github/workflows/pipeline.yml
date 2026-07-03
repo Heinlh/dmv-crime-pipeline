@@ -41,8 +41,10 @@ jobs:
           path: |
             data/raw
             state
-          key: pipeline-data-${{ github.run_id }}
-          restore-keys: pipeline-data-
+          # v2: bumped to discard caches whose DC watermark advanced while
+          # layer discovery was broken (only 2025+ had been pulled)
+          key: pipeline-data-v2-${{ github.run_id }}
+          restore-keys: pipeline-data-v2-
 
       - name: Run pipeline (extract, load, transform, export)
         env:
