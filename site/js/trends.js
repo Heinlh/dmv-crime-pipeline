@@ -6,8 +6,10 @@
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const CHART_INK = "#9fb0c3";
-const CHART_GRID = "#1a2534";
+// Mirrors the CSS tokens --text-2 and --grid in site/css/style.css
+// (Chart.js needs literal values).
+const CHART_INK = "#a6b0c9";
+const CHART_GRID = "#1d1b30";
 
 Chart.defaults.color = CHART_INK;
 Chart.defaults.borderColor = CHART_GRID;
@@ -360,8 +362,8 @@ function renderHeatmap() {
       if (count > peak.count) peak = { dow, part, count };
       if (count < quiet.count) quiet = { dow, part, count };
       const intensity = count / max;
-      const bg = `rgba(94, 200, 242, ${0.05 + intensity * 0.85})`;
-      const ink = intensity > 0.55 ? "#0a0e14" : "var(--text)";
+      const bg = `rgba(77, 227, 255, ${0.05 + intensity * 0.85})`;
+      const ink = intensity > 0.55 ? "#0a0a14" : "var(--text)";
       const readout = `${WEEKDAYS_FULL[dow]} ${dp.label.toLowerCase()} (${dp.hint}): ${count.toLocaleString()} reported incidents`;
       html += `<div class="heatmap-cell" role="img" tabindex="0" aria-label="${readout}"
         title="${readout}" style="background:${bg};color:${ink}">${count.toLocaleString()}</div>`;
