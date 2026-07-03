@@ -13,8 +13,8 @@ let shownCount = 0;
 function matchesSearch(inc, terms) {
   if (!terms.length) return true;
   const haystack = [
-    inc.offense_raw, inc.block_address, inc.area_name, inc.city,
-    inc.case_number, categoryLabel(inc.offense_category),
+    incidentTitle(inc), inc.offense_raw, inc.block_address, inc.area_name,
+    inc.city, inc.case_number, categoryLabel(inc.offense_category),
     jurisdictionLabel(inc.jurisdiction),
   ].join(" ").toLowerCase();
   return terms.every(t => haystack.includes(t));
@@ -54,11 +54,11 @@ function cardHtml(inc) {
         <span class="badge ${esc(cat)}">${esc(categoryLabel(cat))}</span>
         <span class="when">${esc(fmtDateTime(inc.occurred_at))}</span>
       </div>
-      <div class="title">${esc(inc.offense_raw || "Unknown offense")}</div>
+      <div class="title">${esc(incidentTitle(inc))}</div>
       <div class="meta">
         ${esc(inc.block_address || "Location withheld")}<br>
         ${esc(jurisdictionLabel(inc.jurisdiction))}${inc.area_name ? " &middot; " + esc(inc.area_name) : ""}<br>
-        ${inc.case_number ? `<span class="case">CASE #${esc(inc.case_number)}</span>` : ""}
+        <span class="case">AGENCY LABEL: ${esc(inc.offense_raw || "n/a")}${inc.case_number ? ` &middot; CASE #${esc(inc.case_number)}` : ""}</span>
       </div>
     </article>
   `;
@@ -102,6 +102,7 @@ function wireControls() {
 }
 
 async function init() {
+  populateJurisdictionFilter("f-jurisdiction");
   populateCategoryFilter();
   wireControls();
   try {

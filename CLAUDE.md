@@ -1,17 +1,20 @@
 # DMV Crime Pipeline
 
 ETL pipeline ingesting public crime data for the DMV area into a unified
-DuckDB warehouse. Currently covers Montgomery County MD (Socrata) and
-Washington DC (ArcGIS). Built as a portfolio project demonstrating
+DuckDB warehouse. Currently covers Montgomery County MD (Socrata),
+Washington DC (ArcGIS), and Prince George's County MD (Socrata, updated
+weekly by the county). Built as a portfolio project demonstrating
 analytics engineering: incremental extraction, raw/marts layering,
 cross-jurisdiction taxonomy mapping, and idempotent loads.
 
 ## Commands
 
-- `python run_pipeline.py` runs extract (both sources), load, transform, and site export
+- `python run_pipeline.py` runs extract (all sources), load, transform, and site export
 - `python test_pipeline_offline.py` full offline smoke test, no network needed
-- `python -m extractors.moco` or `python -m extractors.dc` run one extractor
+- `python -m extractors.moco` / `.dc` / `.pgc` run one extractor
 - `python -m export.export_site_data` regenerate `site/data/` without re-extracting
+- `python -m export.send_digest_email` send the daily digest via Buttondown
+  (silent no-op without BUTTONDOWN_API_KEY)
 - `cd site && python -m http.server 8000` preview the static site locally (fetch() needs http://, not file://)
 
 ## Architecture
@@ -31,10 +34,15 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   the map and events search), `trends.json` daily counts by jurisdiction
   and category over the full history (feeds any trends period back to
   2016), `heatmap.json` weekday x hour x jurisdiction x category last
-  90 days (the site folds hours into dayparts)
+  90 days (the site folds hours into dayparts), `digest.json` daily
+  brief for the latest data day (bullets, comparisons, notable
+  incidents; feeds both site/daily.html and the email digest)
 - `site/` static HTML/CSS/JS (Leaflet + markercluster + Chart.js via CDN,
-  no build step, no framework) reading `site/data/`; four pages (Map =
-  index, Trends, Events, About), nav repeated per page. Retro neon
+  no build step, no framework) reading `site/data/`; seven pages (Map =
+  index, Trends, Events, Daily Brief, Alerts, About, Privacy), nav
+  repeated per page. Incident titles are factual composites built only
+  from published fields via `friendlyOffense`/`incidentTitle` in
+  common.js; the agency's own label always stays visible on the card. Retro neon
   cyberpunk theme, dark-only: design tokens in `:root` of
   site/css/style.css (cyan = primary accent, magenta = secondary, amber
   = warnings/elevated, red only for homicide); glow reserved for
@@ -65,7 +73,16 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   descriptions, examples) lives ONLY in site/js/common.js CATEGORIES
   (CSS variables in site/css/style.css mirror the colors).
 - No em dashes in any prose, docs, or comments.
-- Requires SOCRATA_APP_TOKEN env var for reasonable MoCo rate limits.
+- Requires SOCRATA_APP_TOKEN env var for reasonable MoCo/PGC rate limits.
+- NO PII in this repo or the static site, ever: email signups post
+  directly to Buttondown (set BUTTONDOWN_USERNAME in site/js/common.js;
+  BUTTONDOWN_API_KEY repo secret enables the daily email); subscriber
+  data and signup counts live only in Buttondown's dashboard.
+- Incident titles must be traceable to published data fields; never
+  compose narrative details the agency did not publish.
+- Arlington County has no machine-readable feed since mid-2022 (excluded
+  until the county resumes); Fairfax County is the next candidate, use
+  .github/workflows/probe.yml to inspect its ArcGIS schema first.
 
 ## Roadmap (in order)
 
