@@ -43,9 +43,18 @@ palette is validated for colorblind safety against the dark surface:
 | Page | Shows |
 |---|---|
 | site/index.html | Map: freshness banner, plain-English weekly summary and KPI tiles, then the clustered incident map (hover a dot for the offense, click for the full summary card) with a live-count legend, filterable by jurisdiction, date range, category, severity |
-| site/trends.html | Full-history trends with period presets (90D / 1Y / YTD / ALL) plus a custom month range (e.g. 2017-2020) and day/week/month granularity; volume line, category breakdown with prior-period deltas, day/hour heatmap, table view per chart |
-| site/events.html | Searchable incident log over the last 90 days: free-text search (offense, street, case number, district) plus jurisdiction/category/date/sort filters, rendered as summary cards |
+| site/trends.html | Full-history trends with period presets (90D / 1Y / YTD / ALL) plus a custom month range (e.g. 2017-2020) and day/week/month granularity; volume line, category breakdown with prior-period deltas, day/daypart heatmap, table view per chart |
+| site/events.html | Searchable incident log over the last 90 days: free-text search (offense, street, case number, district) plus jurisdiction/category/date/sort filters, rendered as summary cards with factual plain-English titles (agency label always shown) |
+| site/daily.html | Daily Brief: plain-English bullets for the latest data day, category and 14-day charts, and the day's most serious incidents; powered by digest.json |
+| site/alerts.html | Email signup for the daily brief, handled entirely by Buttondown (double opt-in, unsubscribe, subscriber dashboard); shows setup instructions until BUTTONDOWN_USERNAME is configured in site/js/common.js |
+| site/privacy.html | Plain-English privacy policy: no first-party data collection, third-party services disclosed, email handling explained |
 | site/about.html | Purpose, sources, pipeline mechanics, and honest caveats, written for a non-technical visitor |
+
+Email digest: `export/send_digest_email.py` runs at the end of the daily
+workflow and posts the digest to the Buttondown API; it is a silent no-op
+until a `BUTTONDOWN_API_KEY` repository secret exists, so the email layer
+is fully optional. Subscriber addresses never touch this repository or
+the site; signup tracking lives in Buttondown's dashboard.
 
 `site/js/common.js` holds the shared friendly-label taxonomy (`CATEGORY_LABELS`,
 `CATEGORY_DESCRIPTIONS`), colors, and formatters used across pages, so raw
@@ -145,8 +154,10 @@ is idempotent.
 ## Roadmap
 
 - dbt project replacing sql/transform.sql (staging, seeds, tests, marts)
-- Priority-case scoring (severity x recency x cluster bonus) and a daily
-  digest, published as a dated page and/or emailed
+- Priority-case scoring (severity x recency x cluster bonus)
 - H3 hex hotspot layer on the map
-- Additional jurisdictions: Prince George's County, NoVA
+- Fairfax County (probe its ArcGIS schema first with
+  `.github/workflows/probe.yml`); Arlington County is excluded until the
+  county resumes publishing machine-readable incident data (their open
+  dataset stopped in mid-2022)
 - Local news RSS matching, Census per-capita normalization

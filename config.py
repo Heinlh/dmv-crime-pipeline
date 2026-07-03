@@ -31,6 +31,21 @@ MOCO = {
     "page_size": 5000,
 }
 
+# Prince George's County: Socrata SODA API on data.princegeorgescountymd.gov.
+# The county split its crime data in two: wb4e-w4nf covers Feb 2017 to
+# 5 July 2023 (frozen), xjru-idbe covers July 2023 to present. The
+# current dataset is updated WEEKLY by the county, so PG County data is
+# always a few days behind the daily sources. The extractor only reads
+# the frozen dataset when the watermark predates its cutoff (backfill).
+PGC = {
+    "source_name": "pgc",
+    "base_url": "https://data.princegeorgescountymd.gov/resource/xjru-idbe.json",
+    "historical_url": "https://data.princegeorgescountymd.gov/resource/wb4e-w4nf.json",
+    "historical_cutoff": "2023-07-06T00:00:00",
+    "watermark_field": "date",  # floating timestamp in SODA
+    "page_size": 5000,
+}
+
 # DC: MPD FEEDS FeatureServer on maps2.dcgis.dc.gov.
 # DC publishes one "Crime Incidents in YYYY" layer per calendar year. The
 # extractor discovers the year -> layer id map from the FeatureServer's

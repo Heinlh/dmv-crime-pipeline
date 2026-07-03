@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 SOURCES = {
     "moco": "raw.moco_incidents",
     "dc": "raw.dc_incidents",
+    "pgc": "raw.pgc_incidents",
 }
 
 # Columns sql/transform.sql references per raw table. Socrata (and to a
@@ -35,6 +36,15 @@ EXPECTED_COLUMNS = {
     "raw.dc_incidents": [
         "CCN", "REPORT_DAT", "START_DATE", "END_DATE", "OFFENSE", "BLOCK",
         "WARD", "LATITUDE", "LONGITUDE", "METHOD",
+    ],
+    # PG County renamed columns between its dataset generations, so the
+    # transform coalesces across every candidate name; padding them all
+    # keeps that SQL valid whichever generation a batch came from.
+    "raw.pgc_incidents": [
+        "incident_case_id", "id", "date", "clearance_code_inc_type",
+        "offense", "inc_type", "street_address", "location", "address",
+        "city", "zip_code", "pgpd_sector", "sector", "pgpd_beat",
+        "latitude", "longitude",
     ],
 }
 
@@ -79,6 +89,8 @@ def run() -> None:
             if "raw.moco_incidents" in statement and "moco_incidents" not in existing:
                 continue
             if "raw.dc_incidents" in statement and "dc_incidents" not in existing:
+                continue
+            if "raw.pgc_incidents" in statement and "pgc_incidents" not in existing:
                 continue
             con.execute(statement)
         total = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
