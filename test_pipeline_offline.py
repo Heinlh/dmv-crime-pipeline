@@ -60,6 +60,12 @@ moco_records = [
      "district": "WHEATON", "location": "11200 BLK GEORGIA AVE",
      "city": "WHEATON", "state": "MD", "zip_code": "20902",
      "victims": "1", "latitude": "39.0398", "longitude": "-77.0552"},
+    # homicide taxonomy check
+    {"incident_id": "201234570", "case_number": "24001113",
+     "start_date": _iso(RECENT_B), "crimename2": "Murder and Nonnegligent Manslaughter",
+     "district": "GERMANTOWN", "location": "19900 BLK FREDERICK RD",
+     "city": "GERMANTOWN", "state": "MD", "zip_code": "20874",
+     "victims": "1", "latitude": "39.1732", "longitude": "-77.2717"},
 ]
 
 ms = lambda dt: str(int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000))
@@ -72,6 +78,11 @@ dc_records = [
      "OFFENSE": "THEFT F/AUTO", "METHOD": "OTHERS",
      "BLOCK": "3200 - 3299 BLOCK OF M STREET NW", "WARD": "2", "DISTRICT": "2",
      "SHIFT": "EVENING", "LATITUDE": "0", "LONGITUDE": "0", "OBJECTID": "2"},  # failed geocode -> NULL
+    # sexual-offense taxonomy check
+    {"CCN": "26098767", "REPORT_DAT": ms(RECENT_B), "START_DATE": ms(RECENT_B - timedelta(hours=8)),
+     "OFFENSE": "SEX ABUSE", "METHOD": "OTHERS",
+     "BLOCK": "1200 - 1299 BLOCK OF H STREET NE", "WARD": "6", "DISTRICT": "1",
+     "SHIFT": "EVENING", "LATITUDE": "38.9002", "LONGITUDE": "-76.9895", "OBJECTID": "3"},
 ]
 
 land_raw(moco_records, "moco")
@@ -91,11 +102,26 @@ print("\n--- daily_counts ---")
 print(con.execute("SELECT * FROM marts.daily_counts ORDER BY occurred_date").df().to_string(index=False))
 
 n = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
-assert n == 5, f"expected 5 unique incidents, got {n}"
+assert n == 7, f"expected 7 unique incidents, got {n}"
 dup = con.execute("SELECT occurred_at FROM marts.fct_incidents WHERE incident_key='moco-201234567'").fetchone()[0]
 assert str(dup).startswith(RECENT_A_FIX.strftime("%Y-%m-%d %H:%M")), "dedupe should keep the latest version"
 geo = con.execute("SELECT latitude FROM marts.fct_incidents WHERE incident_key='dc-26098766'").fetchone()[0]
 assert geo is None, "0,0 geocode should be nulled"
+
+# unified taxonomy mapping across both sources
+categories = dict(con.execute(
+    "SELECT incident_key, offense_category FROM marts.fct_incidents").fetchall())
+expected_categories = {
+    "moco-201234570": "homicide",   # Murder and Nonnegligent Manslaughter
+    "moco-201234568": "violent",    # Aggravated Assault
+    "moco-201234567": "vehicle",    # Theft From Motor Vehicle
+    "moco-160000001": "violent",    # Robbery
+    "dc-26098765": "violent",       # ROBBERY
+    "dc-26098766": "vehicle",       # THEFT F/AUTO
+    "dc-26098767": "sexual",        # SEX ABUSE
+}
+for key, expected in expected_categories.items():
+    assert categories[key] == expected, f"{key}: expected {expected}, got {categories[key]}"
 
 # --- exported site data ---
 summary = json.loads((SITE_DATA_DIR / "summary.json").read_text())
@@ -103,9 +129,10 @@ incidents = json.loads((SITE_DATA_DIR / "incidents.json").read_text())
 trends = json.loads((SITE_DATA_DIR / "trends.json").read_text())
 heatmap = json.loads((SITE_DATA_DIR / "heatmap.json").read_text())
 
-assert summary["total_records"] == 5
+assert summary["total_records"] == 7
 assert summary["data_start_date"] == "2016-08-15", summary["data_start_date"]
-assert (SITE_DATA_DIR / "heatmap.json").exists() and heatmap["rows"], "heatmap should have rows"
+assert heatmap["rows"], "heatmap should have rows"
+assert heatmap["columns"] == ["weekday", "hour", "jurisdiction", "offense_category", "count"], heatmap["columns"]
 
 keys = {row[incidents["columns"].index("incident_key")] for row in incidents["rows"]}
 assert "moco-160000001" not in keys, "2016 record must be outside the incident window"

@@ -126,7 +126,7 @@ function applyFilters() {
       radius: 7,
       fillColor: color,
       fillOpacity: 0.85,
-      color: "#0a0e14",
+      color: "#0a0a14",
       weight: 2,
     });
     marker.bindTooltip(inc.offense_raw || "Unknown offense", { direction: "top", opacity: 1 });

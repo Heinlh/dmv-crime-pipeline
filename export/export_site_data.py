@@ -133,19 +133,24 @@ def _trends(con) -> dict:
 
 
 def _heatmap(con) -> dict:
+    # Keeps jurisdiction and category as dimensions so the site can
+    # filter the heatmap client-side; the page aggregates hours into
+    # dayparts (morning/afternoon/evening/night) itself.
     rows = con.execute(f"""
         SELECT
             dayofweek(occurred_at) AS weekday,
             hour(occurred_at)      AS hour,
+            jurisdiction,
+            offense_category,
             COUNT(*)               AS count
         FROM marts.fct_incidents
         WHERE occurred_at >= {NOW} - INTERVAL {HEATMAP_WINDOW_DAYS} DAY
-        GROUP BY 1, 2
-        ORDER BY 1, 2
+        GROUP BY 1, 2, 3, 4
+        ORDER BY 1, 2, 3, 4
     """).fetchall()
     return {
         "window_days": HEATMAP_WINDOW_DAYS,
-        "columns": ["weekday", "hour", "count"],
+        "columns": ["weekday", "hour", "jurisdiction", "offense_category", "count"],
         "rows": [list(r) for r in rows],
     }
 

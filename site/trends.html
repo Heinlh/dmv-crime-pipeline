@@ -4,7 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trends - DMV Crime Watch</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%235ec8f2'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%234de3ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -44,6 +47,18 @@
         <button data-gran="month" class="active">MONTH</button>
       </span>
     </label>
+    <label>Jurisdiction
+      <select id="f-jurisdiction">
+        <option value="">All</option>
+        <option value="dc">Washington DC</option>
+        <option value="moco">Montgomery County</option>
+      </select>
+    </label>
+    <label>Category
+      <select id="f-category">
+        <option value="">All</option>
+      </select>
+    </label>
     <span class="result-count" id="period-readout"></span>
   </div>
 
@@ -72,11 +87,15 @@
 
   <div class="panel">
     <h2>When are incidents most commonly reported?</h2>
-    <div id="heatmap" class="heatmap-grid"></div>
-    <p class="chart-caption" id="caption-heatmap">
-      Fixed to the last 90 days (this view needs incident-level timestamps,
-      which the site only ships for the recent window). Darker cells mean
-      more reported incidents.
+    <p class="heatmap-subtitle">Darker boxes show days and times with more reported incidents.</p>
+    <div id="heatmap" class="heatmap-grid" role="table" aria-label="Reported incidents by day of week and time of day"></div>
+    <p class="chart-caption" id="caption-heatmap"></p>
+    <p class="chart-caption" id="heatmap-note">
+      Based on the last 90 days of reports (the jurisdiction and category
+      filters above apply; the time period picker does not, since this view
+      needs incident-level timestamps the site only ships for the recent
+      window). Times reflect when the offense occurred as reported by the
+      agency.
     </p>
   </div>
 
