@@ -22,8 +22,12 @@ Layers in the warehouse (data/warehouse/crime.duckdb):
 | marts | marts.fct_incidents | One row per incident, unified schema and taxonomy, idempotent upserts |
 | marts | marts.daily_counts | Rollup view feeding dashboards and the daily digest |
 
-Unified taxonomy: violent, property, vehicle, drug, society, other, each
-with a 1 to 10 severity weight that feeds priority case scoring.
+Unified taxonomy: homicide/fatal violence, violent crime, sexual
+offenses, property crime, vehicle-related crime, drug/alcohol/disorder,
+and other/unknown, each with a 1 to 10 severity weight that feeds
+priority case scoring. Display metadata for the taxonomy (plain-English
+labels, colorblind-validated colors, descriptions, examples) has a
+single source of truth in `site/js/common.js` (`CATEGORIES`).
 
 `export/export_site_data.py` runs after every load and snapshots the
 warehouse into `site/data/`: `summary.json` (KPIs and freshness),

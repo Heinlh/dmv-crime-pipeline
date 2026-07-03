@@ -22,8 +22,11 @@ CREATE SCHEMA IF NOT EXISTS marts;
 
 -- ---------------------------------------------------------------------
 -- Unified crime taxonomy used across all jurisdictions:
---   violent | property | vehicle | drug | society | other
--- severity_weight (1-10) feeds the priority-case scoring later.
+--   homicide | violent | sexual | property | vehicle | disorder | other
+-- Display metadata (labels, colors, descriptions) lives in
+-- site/js/common.js CATEGORIES; these keys are the contract between the
+-- warehouse and the site. severity_weight (1-10) feeds the
+-- priority-case scoring later.
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS marts.dim_offense_map (
     jurisdiction     VARCHAR NOT NULL,
@@ -35,8 +38,8 @@ CREATE TABLE IF NOT EXISTS marts.dim_offense_map (
 
 -- DC publishes a closed set of nine offense values, so map them fully.
 INSERT OR REPLACE INTO marts.dim_offense_map VALUES
-    ('dc', 'HOMICIDE',                  'violent',  10),
-    ('dc', 'SEX ABUSE',                 'violent',   9),
+    ('dc', 'HOMICIDE',                  'homicide', 10),
+    ('dc', 'SEX ABUSE',                 'sexual',    9),
     ('dc', 'ASSAULT W/DANGEROUS WEAPON','violent',   8),
     ('dc', 'ROBBERY',                   'violent',   7),
     ('dc', 'ARSON',                     'property',  6),
