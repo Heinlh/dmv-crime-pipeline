@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alerts - DMV Crime Watch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='%234de3ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="pulse" aria-hidden="true"></span>DMV<span class="tag">//</span>CRIME WATCH</a>
+  <div class="links">
+    <a class="link" href="index.html">Map</a>
+    <a class="link" href="trends.html">Trends</a>
+    <a class="link" href="events.html">Events</a>
+    <a class="link" href="daily.html">Daily Brief</a>
+    <a class="link active" href="alerts.html">Alerts</a>
+    <a class="link" href="about.html">About</a>
+  </div>
+</nav>
+<main>
+  <p class="kicker">Alerts // the daily brief, by email</p>
+  <h1>Email Alerts</h1>
+  <p class="subtitle">
+    One email per day with the same plain-English brief as the
+    <a href="daily.html">Daily Brief</a> page: what happened, where, and
+    how it compares to a typical day.
+  </p>
+
+  <div class="panel" id="signup-panel">
+    <h2>Sign up</h2>
+    <form id="signup-form" class="filters" method="post" target="_blank" hidden>
+      <label class="grow">Email address
+        <input type="email" name="email" required autocomplete="email"
+               placeholder="you@example.com" aria-label="Email address for daily alerts">
+      </label>
+      <button type="submit" class="load-more" style="margin:0;">SUBSCRIBE</button>
+    </form>
+    <div id="signup-setup" hidden>
+      <p>
+        Email alerts aren't live yet. <strong>Site owner setup:</strong>
+        create a free account at <a href="https://buttondown.com" rel="noopener">Buttondown</a>,
+        set <code>BUTTONDOWN_USERNAME</code> in <code>site/js/common.js</code>,
+        and add a <code>BUTTONDOWN_API_KEY</code> repository secret so the
+        daily pipeline can send the digest.
+      </p>
+    </div>
+    <p class="chart-caption">
+      Signups are handled by <a href="https://buttondown.com" rel="noopener">Buttondown</a>
+      with a confirmation email (double opt-in). Your address is stored by
+      Buttondown, never by this site or its code repository, and is used
+      only to send the daily brief. Every email includes an unsubscribe
+      link. See the <a href="privacy.html">privacy policy</a>.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>What you'll get</h2>
+    <ul class="legend-notes">
+      <li>One email per day, sent after the morning data refresh.</li>
+      <li>Bullet-point summary of the latest data day: totals vs. a typical day, top category, per-jurisdiction counts.</li>
+      <li>The day's most serious incidents, each with its official agency label and block-level location.</li>
+      <li>Links back to the live map and trends for the full picture.</li>
+    </ul>
+  </div>
+
+  <footer class="data-note">
+    Data as of last published agency data, not live.
+    &middot; <a href="privacy.html">Privacy policy</a>
+  </footer>
+</main>
+<script src="js/common.js"></script>
+<script>
+  // The form only renders once the owner has configured Buttondown;
+  // otherwise show setup instructions so the page is never a dead end.
+  const form = document.getElementById("signup-form");
+  if (BUTTONDOWN_USERNAME) {
+    form.action = `https://buttondown.com/api/emails/embed-subscribe/${encodeURIComponent(BUTTONDOWN_USERNAME)}`;
+    form.hidden = false;
+  } else {
+    document.getElementById("signup-setup").hidden = false;
+  }
+</script>
+</body>
+</html>

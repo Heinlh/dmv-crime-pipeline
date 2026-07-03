@@ -51,6 +51,16 @@ jobs:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
         run: python run_pipeline.py
 
+      # Optional daily digest email via Buttondown. A silent no-op until
+      # the BUTTONDOWN_API_KEY repository secret exists, so the pipeline
+      # never depends on the email layer.
+      - name: Send daily digest email
+        if: always()
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+          SITE_URL: https://heinlh.github.io/dmv-crime-pipeline
+        run: python -m export.send_digest_email
+
       # Runs even if the pipeline step above reported extractor failures,
       # so the site still deploys with whatever data landed.
       - uses: actions/upload-pages-artifact@v3

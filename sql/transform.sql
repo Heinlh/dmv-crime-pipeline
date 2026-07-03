@@ -109,6 +109,100 @@ SELECT
 FROM deduped
 WHERE rn = 1 AND incident_id IS NOT NULL;
 
+-- -------------------------------------------- Prince George's County
+-- Column names differ between the county's two dataset generations
+-- (wb4e-w4nf vs xjru-idbe), so identifiers, offense text, and location
+-- fields are coalesced across every candidate name; the loader pads any
+-- candidate a batch omitted. Offense values are short uppercase phrases
+-- like 'THEFT FROM AUTO', 'ASSAULT, WEAPON', 'B & E, RESIDENTIAL',
+-- mapped by the keyword rules below. The dataset also includes traffic
+-- ACCIDENT rows, which land in 'other' (published data stays published).
+INSERT OR REPLACE INTO marts.fct_incidents (
+    incident_key, jurisdiction, source_incident_id, case_number,
+    occurred_at, occurred_end_at, reported_at,
+    offense_raw, offense_category, severity_weight,
+    block_address, city, zip_code, area_name,
+    latitude, longitude, victims, method
+)
+WITH normalized AS (
+    SELECT
+        COALESCE(incident_case_id, id)                  AS src_id,
+        TRY_CAST("date" AS TIMESTAMP)                   AS occurred_ts,
+        UPPER(COALESCE(clearance_code_inc_type, offense, inc_type)) AS off,
+        COALESCE(street_address, location, address)     AS addr,
+        city, zip_code,
+        COALESCE(pgpd_sector, sector, pgpd_beat)        AS area,
+        NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,
+        NULLIF(TRY_CAST(longitude AS DOUBLE), 0)        AS lon
+    FROM raw.pgc_incidents
+),
+deduped AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY src_id ORDER BY occurred_ts DESC NULLS LAST
+    ) AS rn
+    FROM normalized
+)
+SELECT
+    'pgc-' || src_id                                    AS incident_key,
+    'pgc'                                               AS jurisdiction,
+    src_id                                              AS source_incident_id,
+    src_id                                              AS case_number,
+    occurred_ts                                         AS occurred_at,
+    NULL                                                AS occurred_end_at,
+    NULL                                                AS reported_at,
+    off                                                 AS offense_raw,
+    CASE
+        WHEN off LIKE '%HOMICIDE%' OR off LIKE '%MURDER%' THEN 'homicide'
+        WHEN off LIKE '%SEX%' OR off LIKE '%RAPE%'        THEN 'sexual'
+        WHEN off LIKE '%THEFT FROM AUTO%'
+          OR off LIKE '%AUTO, STOLEN%'
+          OR off LIKE '%STOLEN VEHICLE%'
+          OR off LIKE '%CARJACK%'                         THEN 'vehicle'
+        WHEN off LIKE '%ASSAULT%'
+          OR off LIKE '%ROBBERY%'
+          OR off LIKE '%WEAPON%'
+          OR off LIKE '%SHOOTING%'                        THEN 'violent'
+        WHEN off LIKE '%B & E%'
+          OR off LIKE '%BREAKING%'
+          OR off LIKE '%BURGLARY%'
+          OR off LIKE '%THEFT%'
+          OR off LIKE '%LARCENY%'
+          OR off LIKE '%VANDAL%'
+          OR off LIKE '%FRAUD%'
+          OR off LIKE '%ARSON%'                           THEN 'property'
+        WHEN off LIKE '%DRUG%'
+          OR off LIKE '%NARCOT%'
+          OR off LIKE '%ALCOHOL%'
+          OR off LIKE '%DUI%'
+          OR off LIKE '%DISORDER%'                        THEN 'disorder'
+        ELSE 'other'
+    END                                                 AS offense_category,
+    CASE
+        WHEN off LIKE '%HOMICIDE%' OR off LIKE '%MURDER%' THEN 10
+        WHEN off LIKE '%SEX%' OR off LIKE '%RAPE%'        THEN 9
+        WHEN off LIKE '%SHOOTING%'                        THEN 8
+        WHEN off LIKE '%ROBBERY%' OR off LIKE '%CARJACK%' THEN 7
+        WHEN off LIKE '%ARSON%'                           THEN 6
+        WHEN off LIKE '%ASSAULT%' OR off LIKE '%B & E%'
+          OR off LIKE '%BURGLARY%' OR off LIKE '%BREAKING%' THEN 5
+        WHEN off LIKE '%AUTO, STOLEN%' OR off LIKE '%STOLEN VEHICLE%'
+          OR off LIKE '%WEAPON%'                          THEN 4
+        WHEN off LIKE '%THEFT%' OR off LIKE '%LARCENY%'   THEN 3
+        WHEN off LIKE '%DRUG%' OR off LIKE '%NARCOT%'
+          OR off LIKE '%DUI%'                             THEN 2
+        ELSE 1
+    END                                                 AS severity_weight,
+    addr                                                AS block_address,
+    city,
+    zip_code,
+    area                                                AS area_name,
+    lat                                                 AS latitude,
+    lon                                                 AS longitude,
+    NULL                                                AS victims,
+    NULL                                                AS method
+FROM deduped
+WHERE rn = 1 AND src_id IS NOT NULL;
+
 -- ----------------------------------------------------------------- DC
 INSERT OR REPLACE INTO marts.fct_incidents (
     incident_key, jurisdiction, source_incident_id, case_number,

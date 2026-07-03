@@ -23,8 +23,10 @@ async function renderSummary() {
     const direction = s.pct_change_7d === null
       ? "about the same as"
       : renderTrendDirection(s.pct_change_7d);
-    sentence.textContent = `In the last 7 days, DC and Montgomery County reported ${s.last_7d_count.toLocaleString()} ` +
-      `incidents, ${direction} the previous 7 days. The most common category was ${topCategoryLabel}.`;
+    const jurisdictionNames = (s.sources_active || []).map(jurisdictionLabel).join(", ");
+    sentence.textContent = `In the last 7 days, ${s.last_7d_count.toLocaleString()} incidents were reported ` +
+      `across ${jurisdictionNames || "the DMV"}, ${direction} the previous 7 days. ` +
+      `The most common category was ${topCategoryLabel}.`;
     sentence.classList.remove("loading");
 
     const deltaClass = s.pct_change_7d > 0 ? "up" : s.pct_change_7d < 0 ? "down" : "";
@@ -92,11 +94,11 @@ function popupHtml(inc) {
   return `
     <div class="incident-card">
       <span class="badge ${esc(cat)}">${esc(categoryLabel(cat))}</span>
-      <div class="title">${esc(inc.offense_raw || "Unknown offense")}</div>
+      <div class="title">${esc(incidentTitle(inc))}</div>
       <div class="when">${esc(fmtDateTime(inc.occurred_at))}</div>
       <div class="row"><strong>${esc(inc.block_address || "Location withheld")}</strong></div>
       <div class="row">${esc(jurisdictionLabel(inc.jurisdiction))}${inc.area_name ? " &middot; " + esc(inc.area_name) : ""}</div>
-      ${inc.case_number ? `<div class="row">Case #${esc(inc.case_number)}</div>` : ""}
+      <div class="row agency">Agency label: ${esc(inc.offense_raw || "n/a")}${inc.case_number ? ` &middot; Case #${esc(inc.case_number)}` : ""}</div>
     </div>
   `;
 }
@@ -129,7 +131,7 @@ function applyFilters() {
       color: "#0a0a14",
       weight: 2,
     });
-    marker.bindTooltip(inc.offense_raw || "Unknown offense", { direction: "top", opacity: 1 });
+    marker.bindTooltip(incidentTitle(inc), { direction: "top", opacity: 1 });
     marker.bindPopup(popupHtml(inc), { maxWidth: 300 });
     clusterGroup.addLayer(marker);
     countsByCategory[inc.offense_category] = (countsByCategory[inc.offense_category] || 0) + 1;
@@ -155,6 +157,7 @@ async function initMap() {
   document.getElementById(id).addEventListener("change", applyFilters)
 );
 
+populateJurisdictionFilter("f-jurisdiction");
 populateCategoryFilter();
 renderLegend(null);
 renderSummary();

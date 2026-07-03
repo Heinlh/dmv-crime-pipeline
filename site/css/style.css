@@ -58,6 +58,10 @@
 
 * { box-sizing: border-box; }
 
+/* the hidden attribute must always win, even over display rules from
+   utility classes like .filters (display: flex) */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--sans);
@@ -350,6 +354,7 @@ nav.topnav a.link.active {
 .incident-card .when { font-family: var(--mono); font-size: 0.76rem; color: var(--accent); }
 .incident-card .row { color: var(--text-2); font-size: 0.8rem; }
 .incident-card .row strong { color: var(--text); font-weight: 600; }
+.incident-card .row.agency { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); margin-top: 0.25rem; }
 
 /* marker cluster bubbles: fully self-contained styling (the plugin's
    MarkerCluster.Default.css is intentionally not loaded) */

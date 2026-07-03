@@ -38,12 +38,35 @@ INCIDENT_COLUMNS = [
     "case_number", "latitude", "longitude",
 ]
 
+# Plain-English labels for digest bullets (emails render no JS, so the
+# Python side needs its own copy; keep in sync with site/js/common.js).
+JURISDICTION_LABELS = {
+    "dc": "Washington DC",
+    "moco": "Montgomery County",
+    "pgc": "Prince George's County",
+}
+CATEGORY_LABELS = {
+    "homicide": "Homicide / Fatal Violence",
+    "violent": "Violent Crime",
+    "sexual": "Sexual Offenses",
+    "property": "Property Crime",
+    "vehicle": "Vehicle-Related Crime",
+    "disorder": "Drug / Alcohol / Disorder",
+    "other": "Other / Unknown",
+}
+
 
 def _write_json(name: str, data) -> None:
     path = SITE_DATA_DIR / name
     # separators (no indent) keeps the larger payloads as small as possible
     path.write_text(json.dumps(data, separators=(",", ":")))
     logger.info("Wrote %s (%.1f KB)", path, path.stat().st_size / 1024)
+
+
+def _rows_as_dicts(con, sql: str) -> list[dict]:
+    rows = con.execute(sql).fetchall()
+    columns = [d[0] for d in con.description]
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def _summary(con) -> dict:
@@ -155,6 +178,105 @@ def _heatmap(con) -> dict:
     }
 
 
+def _digest(con) -> dict:
+    """Daily brief for the latest complete data day: counts, comparisons,
+    plain-English bullets, and the day's most severe incidents. Feeds
+    both the Daily Brief page and the optional email digest. Every
+    statement is computed from the warehouse; nothing is editorialized
+    beyond comparisons to the incidents' own history."""
+    latest_day = con.execute("""
+        SELECT MAX(CAST(occurred_at AS DATE)) FROM marts.fct_incidents
+        WHERE occurred_at <= now()
+    """).fetchone()[0]
+    if latest_day is None:
+        return {"latest_day": None, "bullets": ["No data available yet."],
+                "by_jurisdiction": [], "by_category": [], "notable": [], "last14": []}
+    day = f"DATE '{latest_day}'"
+
+    total, prev_day_total = con.execute(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE CAST(occurred_at AS DATE) = {day}),
+            COUNT(*) FILTER (WHERE CAST(occurred_at AS DATE) = {day} - 1)
+        FROM marts.fct_incidents
+    """).fetchone()
+    # typical volume: same weekday over the prior 8 weeks
+    trailing_avg = con.execute(f"""
+        SELECT AVG(n) FROM (
+            SELECT CAST(occurred_at AS DATE) AS d, COUNT(*) AS n
+            FROM marts.fct_incidents
+            WHERE CAST(occurred_at AS DATE) BETWEEN {day} - 56 AND {day} - 1
+              AND dayofweek(occurred_at) = dayofweek({day})
+            GROUP BY 1
+        )
+    """).fetchone()[0]
+
+    by_jurisdiction = _rows_as_dicts(con, f"""
+        SELECT jurisdiction, COUNT(*) AS count
+        FROM marts.fct_incidents
+        WHERE CAST(occurred_at AS DATE) = {day}
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    by_category = _rows_as_dicts(con, f"""
+        SELECT offense_category, COUNT(*) AS count
+        FROM marts.fct_incidents
+        WHERE CAST(occurred_at AS DATE) = {day}
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    notable = _rows_as_dicts(con, f"""
+        SELECT jurisdiction, offense_category, offense_raw, method,
+               block_address, area_name,
+               strftime(occurred_at, '%Y-%m-%dT%H:%M:%S') AS occurred_at,
+               severity_weight
+        FROM marts.fct_incidents
+        WHERE CAST(occurred_at AS DATE) = {day}
+        ORDER BY severity_weight DESC, occurred_at DESC
+        LIMIT 6
+    """)
+    last14 = _rows_as_dicts(con, f"""
+        SELECT CAST(CAST(occurred_at AS DATE) AS VARCHAR) AS date, COUNT(*) AS count
+        FROM marts.fct_incidents
+        WHERE CAST(occurred_at AS DATE) BETWEEN {day} - 13 AND {day}
+        GROUP BY 1 ORDER BY 1
+    """)
+
+    bullets = []
+    if trailing_avg:
+        ratio = total / trailing_avg
+        mood = ("higher than typical" if ratio > 1.15
+                else "quieter than typical" if ratio < 0.85 else "in the typical range")
+        bullets.append(
+            f"{total:,} incidents were reported on {latest_day:%A, %B %-d}, "
+            f"{mood} for a {latest_day:%A} (average {trailing_avg:.0f} over the prior 8 weeks).")
+    else:
+        bullets.append(f"{total:,} incidents were reported on {latest_day:%A, %B %-d}.")
+    if by_category:
+        top = by_category[0]
+        bullets.append(
+            f"The most common category was "
+            f"{CATEGORY_LABELS.get(top['offense_category'], top['offense_category'])} "
+            f"({top['count']:,} of {total:,} incidents).")
+    for row in by_jurisdiction:
+        bullets.append(
+            f"{JURISDICTION_LABELS.get(row['jurisdiction'], row['jurisdiction'])}: "
+            f"{row['count']:,} reported incidents.")
+    homicides = sum(r["count"] for r in by_category if r["offense_category"] == "homicide")
+    if homicides:
+        bullets.append(f"{homicides} homicide{'s' if homicides != 1 else ''} reported.")
+
+    return {
+        "generated_at": con.execute("SELECT strftime(now(), '%Y-%m-%dT%H:%M:%SZ')").fetchone()[0],
+        "latest_day": str(latest_day),
+        "total": total,
+        "prev_day_total": prev_day_total,
+        "trailing_avg_same_weekday": round(trailing_avg, 1) if trailing_avg else None,
+        "by_jurisdiction": by_jurisdiction,
+        "by_category": by_category,
+        "notable": notable,
+        "last14": last14,
+        "bullets": bullets,
+    }
+
+
 def run() -> None:
     SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
@@ -163,6 +285,7 @@ def run() -> None:
     _write_json("incidents.json", _incidents(con))
     _write_json("trends.json", _trends(con))
     _write_json("heatmap.json", _heatmap(con))
+    _write_json("digest.json", _digest(con))
 
     con.close()
     logger.info("Site data export complete")
