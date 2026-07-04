@@ -157,6 +157,11 @@ nav.topnav .brand .pulse {
 
 nav.topnav .brand .tag { color: var(--accent-2); }
 
+/* the DMV wordmark: one letter per theme accent (cyan, magenta, amber) */
+nav.topnav .brand .logo-d { color: var(--accent); }
+nav.topnav .brand .logo-m { color: var(--accent-2); }
+nav.topnav .brand .logo-v { color: var(--warn); }
+
 nav.topnav .links { display: flex; gap: 0.15rem; }
 
 nav.topnav a.link {
