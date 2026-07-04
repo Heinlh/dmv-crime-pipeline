@@ -158,6 +158,18 @@ assert digest["bullets"] and any("incidents were reported" in b for b in digest[
 assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc"}
 assert digest["notable"], "digest should list notable incidents"
 
+# --- the email newsletter builds from the same digest ---
+from export.send_digest_email import build_html, build_narrative  # noqa: E402
+
+narrative = build_narrative(digest)
+assert narrative and all(p.strip() for p in narrative), "narrative must not be empty"
+assert any("The record for" in p for p in narrative), narrative
+email_html = build_html(digest, "https://example.test")
+assert "CRIME WATCH" in email_html
+assert "{{ unsubscribe_url }}" in email_html, "unsubscribe link must be present"
+assert "https://example.test/daily.html" in email_html
+assert "AGENCY LABEL" in email_html, "agency labels must appear on notable incidents"
+
 keys = {row[incidents["columns"].index("incident_key")] for row in incidents["rows"]}
 assert "moco-160000001" not in keys, "2016 record must be outside the incident window"
 assert {"moco-201234567", "moco-201234568", "dc-26098765", "dc-26098766"} <= keys, keys
