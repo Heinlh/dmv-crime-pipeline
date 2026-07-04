@@ -334,7 +334,12 @@ def run() -> int:
     response = requests.post(
         BUTTONDOWN_API,
         json=payload,
-        headers={"Authorization": f"Token {api_key}"},
+        headers={
+            "Authorization": f"Token {api_key}",
+            # Buttondown's confirmation that API-created emails may send
+            # immediately (status 'about_to_send'); required by their API.
+            "X-Buttondown-Live-Dangerously": "true",
+        },
         timeout=60,
     )
     if response.status_code >= 300:
