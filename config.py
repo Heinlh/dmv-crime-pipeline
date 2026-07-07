@@ -46,6 +46,35 @@ PGC = {
     "page_size": 5000,
 }
 
+# Fairfax County: FCPD's public "Crimes Against" feature services on the
+# county's ArcGIS Online org (discovered via probe.yml reconnaissance;
+# these are the layers behind the county's own crime mapping dashboard).
+# Each NIBRS crimes-against group is its own hourly-updated service, and
+# their schemas differ: Person/Property rows are victim/offense level
+# with DateReported + ViolationCodeReference_Descript, Society rows are
+# event level with ReportDate + EventDescription/IBRDescription. The
+# extractor reads each layer's field list and requests only the names in
+# desired_fields that the layer actually has; the transform COALESCEs
+# across the variants. The services also publish victim demographics and
+# officer identifiers; those are deliberately never requested.
+FAIRFAX = {
+    "source_name": "fairfax",
+    "base_url": "https://services9.arcgis.com/kYvfX7YK8OobHItA/arcgis/rest/services",
+    "services": [
+        "CrimesAgainstPerson_CST_FCPOD_FC",
+        "CrimesAgainstProperty_CST_FCPOD_FC",
+        "CrimesAgainstSociety_FCPOD_FC",
+    ],
+    # first of these present on a layer becomes its watermark field
+    "watermark_fields": ["DateReported", "ReportDate"],  # esri epoch-millis
+    "page_size": 2000,  # service maxRecordCount is 2000
+    "desired_fields": [
+        "UniqueID", "DateReported", "ReportDate", "BeginDate", "IBRCode",
+        "IBRDescription", "IncidentNumber", "ViolationCodeReference_Descript",
+        "EventDescription", "Category", "Station", "PatrolArea", "DISTRICT",
+    ],
+}
+
 # DC: MPD FEEDS FeatureServer on maps2.dcgis.dc.gov.
 # DC publishes one "Crime Incidents in YYYY" layer per calendar year. The
 # extractor discovers the year -> layer id map from the FeatureServer's

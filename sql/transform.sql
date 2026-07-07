@@ -203,6 +203,110 @@ SELECT
 FROM deduped
 WHERE rn = 1 AND src_id IS NOT NULL;
 
+-- ------------------------------------------------------ Fairfax County
+-- FCPD's "Crimes Against" services are victim/offense level: an incident
+-- with several victims repeats its IncidentNumber, each row carrying the
+-- offense that applied to that victim. Dedupe keeps one row per incident,
+-- preferring the most severe offense (then the latest report) so a
+-- homicide with three victims lands as one homicide, matching the
+-- incident-level semantics of the other jurisdictions. Category is FCPD's
+-- own NIBRS-group label ('Aggravated Assault', 'Larceny'); the longer
+-- ViolationCodeReference_Descript is kept as the raw offense text.
+INSERT OR REPLACE INTO marts.fct_incidents (
+    incident_key, jurisdiction, source_incident_id, case_number,
+    occurred_at, occurred_end_at, reported_at,
+    offense_raw, offense_category, severity_weight,
+    block_address, city, zip_code, area_name,
+    latitude, longitude, victims, method
+)
+WITH normalized AS (
+    SELECT
+        TRIM(IncidentNumber)                            AS src_id,
+        epoch_ms(TRY_CAST(BeginDate AS BIGINT))         AS occurred_ts,
+        epoch_ms(TRY_CAST(COALESCE(DateReported, ReportDate) AS BIGINT)) AS reported_ts,
+        UPPER(TRIM(COALESCE(ViolationCodeReference_Descript,
+                            IBRDescription, EventDescription, Category))) AS off,
+        DISTRICT                                        AS district,
+        NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,
+        NULLIF(TRY_CAST(longitude AS DOUBLE), 0)        AS lon
+    FROM raw.fairfax_incidents
+),
+scored AS (
+    SELECT *,
+        CASE
+            WHEN off LIKE '%HOMICIDE%' OR off LIKE '%MURDER%'
+              OR off LIKE '%MANSLAUGHTER%'                THEN 10
+            WHEN off LIKE '%RAPE%' OR off LIKE '%SEX%'
+              OR off LIKE '%SODOMY%' OR off LIKE '%FONDLING%' THEN 9
+            WHEN off LIKE '%AGGRAVATED%'                  THEN 8
+            WHEN off LIKE '%ROBBERY%' OR off LIKE '%CARJACK%' THEN 7
+            WHEN off LIKE '%ARSON%'                       THEN 6
+            WHEN off LIKE '%ASSAULT%' OR off LIKE '%KIDNAP%'
+              OR off LIKE '%BURGLARY%' OR off LIKE '%BREAKING%' THEN 5
+            WHEN off LIKE '%MOTOR VEHICLE THEFT%'
+              OR off LIKE '%STOLEN%' OR off LIKE '%WEAPON%' THEN 4
+            WHEN off LIKE '%THEFT%' OR off LIKE '%LARCENY%'
+              OR off LIKE '%FRAUD%' OR off LIKE '%VANDAL%'
+              OR off LIKE '%DESTRUCTION%'                 THEN 3
+            WHEN off LIKE '%DRUG%' OR off LIKE '%NARCOT%'
+              OR off LIKE '%DUI%' OR off LIKE '%LIQUOR%'
+              OR off LIKE '%DISORDER%' OR off LIKE '%PROSTITUTION%'
+              OR off LIKE '%GAMBLING%'                    THEN 2
+            ELSE 1
+        END AS sev
+    FROM normalized
+),
+deduped AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY src_id
+        ORDER BY sev DESC, reported_ts DESC NULLS LAST
+    ) AS rn
+    FROM scored
+)
+SELECT
+    'fairfax-' || src_id                                AS incident_key,
+    'fairfax'                                           AS jurisdiction,
+    src_id                                              AS source_incident_id,
+    src_id                                              AS case_number,
+    COALESCE(occurred_ts, reported_ts)                  AS occurred_at,
+    NULL                                                AS occurred_end_at,
+    reported_ts                                         AS reported_at,
+    off                                                 AS offense_raw,
+    CASE
+        WHEN sev = 10                                   THEN 'homicide'
+        WHEN sev = 9                                    THEN 'sexual'
+        WHEN off LIKE '%CARJACK%'
+          OR off LIKE '%MOTOR VEHICLE THEFT%'
+          OR off LIKE '%FROM MOTOR VEHICLE%'            THEN 'vehicle'
+        WHEN off LIKE '%AGGRAVATED%' OR off LIKE '%ROBBERY%'
+          OR off LIKE '%ASSAULT%' OR off LIKE '%KIDNAP%'
+          OR off LIKE '%INTIMIDATION%' OR off LIKE '%WEAPON%' THEN 'violent'
+        WHEN off LIKE '%ARSON%' OR off LIKE '%BURGLARY%'
+          OR off LIKE '%BREAKING%' OR off LIKE '%THEFT%'
+          OR off LIKE '%LARCENY%' OR off LIKE '%STOLEN%'
+          OR off LIKE '%FRAUD%' OR off LIKE '%VANDAL%'
+          OR off LIKE '%DESTRUCTION%' OR off LIKE '%COUNTERFEIT%'
+          OR off LIKE '%EMBEZZLE%' OR off LIKE '%EXTORT%' THEN 'property'
+        WHEN off LIKE '%DRUG%' OR off LIKE '%NARCOT%'
+          OR off LIKE '%DUI%' OR off LIKE '%LIQUOR%'
+          OR off LIKE '%DISORDER%' OR off LIKE '%PROSTITUTION%'
+          OR off LIKE '%GAMBLING%' OR off LIKE '%PORNOGRAPHY%' THEN 'disorder'
+        ELSE 'other'
+    END                                                 AS offense_category,
+    sev                                                 AS severity_weight,
+    NULL                                                AS block_address,
+    NULL                                                AS city,
+    NULL                                                AS zip_code,
+    CASE WHEN district IS NOT NULL
+         THEN CONCAT(UPPER(SUBSTR(district, 1, 1)), LOWER(SUBSTR(district, 2)), ' District')
+    END                                                 AS area_name,
+    lat                                                 AS latitude,
+    lon                                                 AS longitude,
+    NULL                                                AS victims,
+    NULL                                                AS method
+FROM deduped
+WHERE rn = 1 AND src_id IS NOT NULL AND src_id <> '';
+
 -- ----------------------------------------------------------------- DC
 INSERT OR REPLACE INTO marts.fct_incidents (
     incident_key, jurisdiction, source_incident_id, case_number,

@@ -42,6 +42,14 @@ function applyFilters() {
   shownCount = 0;
   document.getElementById("event-grid").innerHTML = "";
   renderNextPage();
+
+  writeHashState({
+    q: document.getElementById("f-search").value.trim(),
+    j: jurisdiction,
+    cat: category,
+    days: String(rangeDays) === "90" ? "" : String(rangeDays),
+    sort: sort === "newest" ? "" : sort,
+  });
 }
 
 // --------------------------------------------------------- rendering
@@ -101,10 +109,20 @@ function wireControls() {
   document.getElementById("load-more").addEventListener("click", renderNextPage);
 }
 
+function applyHashState() {
+  const h = readHashState();
+  if (h.q) document.getElementById("f-search").value = h.q;
+  if (h.j && JURISDICTION_LABELS[h.j]) document.getElementById("f-jurisdiction").value = h.j;
+  if (h.cat && CATEGORY_ORDER.includes(h.cat)) document.getElementById("f-category").value = h.cat;
+  if (["7", "30", "90"].includes(h.days)) document.getElementById("f-range").value = h.days;
+  if (["oldest", "severity"].includes(h.sort)) document.getElementById("f-sort").value = h.sort;
+}
+
 async function init() {
   populateJurisdictionFilter("f-jurisdiction");
   populateCategoryFilter();
   wireControls();
+  applyHashState();
   try {
     const { incidents, windowDays } = await fetchIncidents();
     allIncidents = incidents;

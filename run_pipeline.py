@@ -7,8 +7,8 @@ with whatever landed successfully.
 import logging
 import sys
 
-from export import export_site_data
-from extractors import dc, moco, pgc
+from export import export_site_data, render_og_card
+from extractors import dc, fairfax, moco, pgc
 from load import load_duckdb
 
 logger = logging.getLogger("pipeline")
@@ -16,7 +16,7 @@ logger = logging.getLogger("pipeline")
 
 def main() -> int:
     failures = []
-    for name, module in (("moco", moco), ("dc", dc), ("pgc", pgc)):
+    for name, module in (("moco", moco), ("dc", dc), ("pgc", pgc), ("fairfax", fairfax)):
         try:
             module.run()
         except Exception:
@@ -25,6 +25,11 @@ def main() -> int:
 
     load_duckdb.run()
     export_site_data.run()
+    try:
+        render_og_card.run()
+    except Exception:
+        # the share card is decoration; never let it fail the pipeline
+        logger.exception("OG card rendering failed")
 
     if failures:
         logger.error("Completed with extractor failures: %s", ", ".join(failures))
