@@ -48,17 +48,16 @@
       DMV Crime Watch pulls official, public crime reports for the DMV
       area, currently <strong>Washington DC</strong>,
       <strong>Montgomery County, MD</strong>,
-      <strong>Prince George's County, MD</strong>, and
-      <strong>Fairfax County, VA</strong>, into one place,
+      <strong>Prince George's County, MD</strong>,
+      <strong>Fairfax County, VA</strong>, and
+      <strong>Prince William County, VA</strong>, into one place,
       refreshed automatically every day. The <a href="index.html">Map</a>
       shows where recent incidents happened, <a href="trends.html">Trends</a>
       shows how activity has changed over any period back to 2016,
       <a href="events.html">Events</a> lets you search individual reports
       from the last 90 days, and the <a href="daily.html">Daily Brief</a>
       summarizes the latest data day (also available
-      <a href="alerts.html">by email</a>). Arlington County stopped
-      publishing machine-readable incident data in 2022, so it can't be
-      included until the county resumes.
+      <a href="alerts.html">by email</a>).
     </p>
   </div>
 
@@ -82,9 +81,39 @@
         FCPD publishes offense, date, police district, and an offset
         map point, but no street address, so Fairfax incidents show
         their district instead of a block address.</li>
+      <li><strong>Prince William County:</strong> PWC Police's public
+        crime reports layer (the data behind the county's own Crime Data
+        Explorer), NIBRS classified and updated daily. The county
+        publishes a rolling 3-year window, maps locations to the nearest
+        100 block, and withholds sexual offense records entirely for
+        victim privacy, so that category is structurally undercounted
+        for this jurisdiction.</li>
       <li>Every agency publishes with a lag, so this site says
         <strong>"as of last published data," never "live."</strong></li>
     </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Why isn't every DMV county here?</h2>
+    <p>
+      Every jurisdiction in the Washington metro area was surveyed for
+      machine-readable incident data. This site can only show what an
+      agency actually publishes as data, and several publish none:
+    </p>
+    <ul>
+      <li><strong>Arlington County</strong> launched a Crime Data Hub in
+        2024 with weekly bulk data; integrating its feed is in progress.</li>
+      <li><strong>Loudoun County</strong> and the
+        <strong>City of Alexandria</strong> publish dashboards and
+        searchable web tools, but no data feed a pipeline can read.</li>
+      <li><strong>Frederick, Charles, Howard, and Anne Arundel Counties
+        (MD)</strong> publish only annual summaries, PDF reports, or
+        third-party dashboards, not incident-level data.</li>
+    </ul>
+    <p>
+      If one of these agencies starts publishing open incident data, it
+      can be added; the pipeline is built for exactly that.
+    </p>
   </div>
 
   <div class="panel">

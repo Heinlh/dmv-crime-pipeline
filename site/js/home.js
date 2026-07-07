@@ -92,10 +92,12 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
 const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 46 });
 map.addLayer(clusterGroup);
 
-// free-text search term applied on top of the dropdown filters, matched
-// against each incident's title/offense/location; drives the map search
+// case-number lookup term driving the map search; when set, it replaces
+// the dropdown filters entirely (a case number identifies one incident)
 let mapSearchTerm = "";
-let shownLatLngs = [];  // latlngs of the currently shown markers (for fit)
+let shownLatLngs = [];       // latlngs of the currently shown markers (for fit)
+let soleResultMarker = null; // the marker when exactly one incident is shown
+let incidentWindowDays = 90; // refreshed from incidents.json on load
 
 // Hotspot polygons live in their own pane below the marker overlay so
 // dots and clusters always draw (and click) above the shading.
@@ -241,22 +243,30 @@ function applyFilters() {
   const cutoff = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
   const playbackDay = playback.active ? playback.days[playback.index] : null;
 
-  const searchTokens = mapSearchTerm.toLowerCase().split(/\s+/).filter(Boolean);
+  // Case lookup overrides the dropdown filters entirely: a case number
+  // identifies one incident, so date range and category must not be
+  // able to hide it (that interaction is exactly what made free-text
+  // search confusing here).
+  const caseQuery = normalizeCase(mapSearchTerm);
 
   clusterGroup.clearLayers();
   let shown = 0;
   const countsByCategory = {};
   shownLatLngs = [];
+  soleResultMarker = null;
 
   for (const inc of allIncidents) {
     if (inc.latitude === null || inc.longitude === null) continue;
-    if (jurisdiction && inc.jurisdiction !== jurisdiction) continue;
-    if (category && inc.offense_category !== category) continue;
-    if (inc.severity_weight < minSeverity) continue;
-    if (playbackDay) {
-      if ((inc.occurred_at || "").slice(0, 10) !== playbackDay) continue;
-    } else if (Number.isNaN(inc._ts) || inc._ts < cutoff) continue;
-    if (searchTokens.length && !matchesSearch(inc, searchTokens)) continue;
+    if (caseQuery) {
+      if (!matchesCase(inc, caseQuery)) continue;
+    } else {
+      if (jurisdiction && inc.jurisdiction !== jurisdiction) continue;
+      if (category && inc.offense_category !== category) continue;
+      if (inc.severity_weight < minSeverity) continue;
+      if (playbackDay) {
+        if ((inc.occurred_at || "").slice(0, 10) !== playbackDay) continue;
+      } else if (Number.isNaN(inc._ts) || inc._ts < cutoff) continue;
+    }
 
     const color = CATEGORY_COLORS[inc.offense_category] || CATEGORY_COLORS.other;
     // Uniform radius: category is the only encoding on the dot. The 2px
@@ -272,14 +282,15 @@ function applyFilters() {
     marker.bindPopup(popupHtml(inc), { maxWidth: 300 });
     clusterGroup.addLayer(marker);
     shownLatLngs.push([inc.latitude, inc.longitude]);
+    soleResultMarker = shown === 0 ? marker : null;
     countsByCategory[inc.offense_category] = (countsByCategory[inc.offense_category] || 0) + 1;
     shown++;
   }
 
-  const scope = playbackDay ? ` on ${fmtDate(playbackDay)}`
-    : mapSearchTerm ? ` for "${mapSearchTerm}"` : "";
+  const scope = caseQuery ? ` for case "${mapSearchTerm}"`
+    : playbackDay ? ` on ${fmtDate(playbackDay)}` : "";
   document.getElementById("result-count").textContent =
-    `${shown.toLocaleString()} incidents shown${scope}`;
+    `${shown.toLocaleString()} incident${shown === 1 ? "" : "s"} shown${scope}`;
   renderLegend(countsByCategory);
 
   writeHashState({
@@ -293,14 +304,17 @@ function applyFilters() {
   });
 }
 
-// Every token must appear somewhere in the incident's searchable text.
-// Same fields the Events page searches, so results are consistent.
-function matchesSearch(inc, tokens) {
-  const haystack = [
-    incidentTitle(inc), inc.offense_raw, inc.block_address, inc.area_name,
-    inc.city, categoryLabel(inc.offense_category), jurisdictionLabel(inc.jurisdiction),
-  ].join(" ").toLowerCase();
-  return tokens.every(t => haystack.includes(t));
+// The map search is a CASE NUMBER lookup only (free-text place and
+// offense matching lives on the Events page; on the map it fought the
+// dropdown filters and produced confusing result sets). Case numbers
+// are compared with the leading '#', spaces, and dashes stripped.
+function normalizeCase(value) {
+  return String(value ?? "").toUpperCase().replace(/[#\s-]/g, "");
+}
+
+function matchesCase(inc, normalizedQuery) {
+  const caseNo = normalizeCase(inc.case_number);
+  return caseNo !== "" && caseNo.includes(normalizedQuery);
 }
 
 // Pan/zoom the map to frame the currently shown markers. Capped zoom so
@@ -315,19 +329,19 @@ function fitToResults() {
 }
 
 // -------------------------------------------------- map search overlay
-// A Google-Maps-style search that suggests crime types and places drawn
-// from the loaded incidents (no third-party geocoder, so nothing about a
-// visitor's query ever leaves the browser). Selecting a suggestion sets
-// a free-text term applied on top of the dropdown filters and frames the
-// matches on the map.
+// A case-number lookup over the loaded incidents (no third-party
+// geocoder, so nothing a visitor types ever leaves the browser). Typing
+// part of a case number suggests matching cases; selecting one shows
+// exactly that incident, frames it, and opens its summary card. The
+// lookup ignores the dropdown filters, since a case number identifies
+// one incident. Free-text place/offense search lives on the Events page.
 
 const mapSearch = (() => {
   const wrap = document.getElementById("map-search");
   const input = document.getElementById("map-search-input");
   const list = document.getElementById("map-search-list");
   const clearBtn = document.getElementById("map-search-clear");
-  let suggestions = [];   // {label, value, group, dot}
-  let items = [];         // currently rendered, in display order
+  let items = [];   // currently rendered suggestions, in display order
   let active = -1;
 
   // keep clicks and scrolls inside the box from panning the map
@@ -336,69 +350,46 @@ const mapSearch = (() => {
     L.DomEvent.disableScrollPropagation(wrap);
   }
 
-  function build() {
-    const crimes = new Map();
-    const places = new Map();
-    const bump = (map_, key, make) => {
-      if (!key) return;
-      if (!map_.has(key)) map_.set(key, { ...make(), weight: 0 });
-      map_.get(key).weight++;
-    };
+  function compute(normalizedQuery) {
+    const matched = [];
     for (const inc of allIncidents) {
-      const cat = inc.offense_category;
-      const color = CATEGORY_COLORS[cat] || CATEGORY_COLORS.other;
-      const catLabel = categoryLabel(cat);
-      bump(crimes, catLabel, () => ({ label: catLabel, value: catLabel, group: "Crime types", dot: color }));
-      const fo = friendlyOffense(inc.offense_raw);
-      if (fo && fo !== catLabel) bump(crimes, fo, () => ({ label: fo, value: fo, group: "Crime types", dot: color }));
-      const jColor = JURISDICTION_COLORS[inc.jurisdiction] || "#7b85a1";
-      bump(places, jurisdictionLabel(inc.jurisdiction), () =>
-        ({ label: jurisdictionLabel(inc.jurisdiction), value: jurisdictionLabel(inc.jurisdiction), group: "Places", dot: jColor }));
-      bump(places, inc.area_name, () => ({ label: inc.area_name, value: inc.area_name, group: "Places", dot: jColor }));
-      bump(places, inc.city, () => ({ label: inc.city, value: inc.city, group: "Places", dot: jColor }));
+      if (!matchesCase(inc, normalizedQuery)) continue;
+      matched.push({
+        value: String(inc.case_number),
+        label: `#${inc.case_number}`,
+        hint: `${incidentTitle(inc)} · ${jurisdictionLabel(inc.jurisdiction)}`,
+        dot: CATEGORY_COLORS[inc.offense_category] || CATEGORY_COLORS.other,
+      });
+      if (matched.length >= 8) break;
     }
-    suggestions = [...crimes.values(), ...places.values()];
-  }
-
-  function compute(q) {
-    if (!q) {
-      return suggestions.slice().sort((a, b) => b.weight - a.weight).slice(0, 6);
-    }
-    const matched = suggestions
-      .filter(s => s.label.toLowerCase().includes(q))
-      .sort((a, b) =>
-        (b.label.toLowerCase().startsWith(q) - a.label.toLowerCase().startsWith(q)) ||
-        (b.weight - a.weight))
-      .slice(0, 7);
     return matched;
   }
 
   function render() {
-    const q = input.value.trim().toLowerCase();
     const rawQ = input.value.trim();
-    items = compute(q);
-    if (rawQ) items = items.concat([{ label: `Search for "${rawQ}"`, value: rawQ, group: "Search", dot: "#4de3ff", free: true }]);
+    const normalizedQuery = normalizeCase(rawQ);
     clearBtn.hidden = !rawQ;
-
+    if (normalizedQuery.length < 3) {
+      // case numbers are long; don't dump suggestions on a keystroke or two
+      list.innerHTML = `<li class="map-search-empty">Type at least 3 characters of a case number (e.g. #20261880131).</li>`;
+      list.hidden = !rawQ && document.activeElement !== input;
+      input.setAttribute("aria-expanded", "true");
+      items = [];
+      return;
+    }
+    items = compute(normalizedQuery);
     if (!items.length) {
-      list.innerHTML = `<li class="map-search-empty">No matching crimes or places.</li>`;
+      list.innerHTML = `<li class="map-search-empty">No case number matching "${esc(rawQ)}" in the last ${incidentWindowDays} days of mapped incidents.</li>`;
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
       return;
     }
-    let html = "";
-    let lastGroup = null;
-    items.forEach((it, i) => {
-      if (it.group !== lastGroup) {
-        html += `<li class="map-search-group" role="presentation">${esc(it.group)}</li>`;
-        lastGroup = it.group;
-      }
-      html += `<li class="map-search-item ${i === active ? "active" : ""}" role="option"
+    list.innerHTML = items.map((it, i) => `
+      <li class="map-search-item ${i === active ? "active" : ""}" role="option"
         aria-selected="${i === active}" data-i="${i}">
         <span class="dot" style="background:${esc(it.dot)}"></span>
-        <span class="msi-label">${esc(it.label)}</span></li>`;
-    });
-    list.innerHTML = html;
+        <span class="msi-label mono">${esc(it.label)}</span>
+        <span class="msi-meta">${esc(it.hint)}</span></li>`).join("");
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
   }
@@ -412,12 +403,23 @@ const mapSearch = (() => {
   function choose(it) {
     if (!it) return;
     mapSearchTerm = it.value;
-    input.value = it.value;
+    input.value = `#${it.value}`.replace(/^##/, "#");
     clearBtn.hidden = false;
     close();
     input.blur();
     applyFilters();
-    fitToResults();
+    if (soleResultMarker) {
+      // One exact hit. In lookup mode only the matches are on the map,
+      // so a sole marker is never clustered with anything: a plain
+      // un-animated setView then openPopup is reliable, and unlike
+      // markercluster's zoomToShowLayer it leaves no pending animation
+      // callback to dangle if the user filters again mid-zoom.
+      const marker = soleResultMarker;
+      map.setView(marker.getLatLng(), 16, { animate: false });
+      setTimeout(() => { if (marker._map) marker.openPopup(); }, 80);
+    } else {
+      fitToResults();
+    }
   }
 
   function clear() {
@@ -425,6 +427,7 @@ const mapSearch = (() => {
     mapSearchTerm = "";
     clearBtn.hidden = true;
     close();
+    map.closePopup();
     applyFilters();
   }
 
@@ -435,7 +438,9 @@ const mapSearch = (() => {
     else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(active - 1, 0); render(); }
     else if (e.key === "Enter") {
       e.preventDefault();
-      choose(active >= 0 ? items[active] : (input.value.trim() ? { value: input.value.trim() } : null));
+      if (active >= 0 && items[active]) choose(items[active]);
+      else if (items.length === 1) choose(items[0]);
+      else if (input.value.trim()) choose({ value: input.value.trim().replace(/^#/, "") });
     } else if (e.key === "Escape") {
       if (!list.hidden) close(); else clear();
     }
@@ -452,16 +457,16 @@ const mapSearch = (() => {
 
   return {
     init() {
-      build();
-      if (mapSearchTerm) { input.value = mapSearchTerm; clearBtn.hidden = false; }
+      if (mapSearchTerm) { input.value = `#${mapSearchTerm}`; clearBtn.hidden = false; }
     },
   };
 })();
 
 async function initMap() {
   try {
-    const { incidents } = await fetchIncidents();
+    const { incidents, windowDays } = await fetchIncidents();
     allIncidents = incidents;
+    if (windowDays) incidentWindowDays = windowDays;
     if (pendingPlaybackDay) restorePlaybackDay(pendingPlaybackDay);
     mapSearch.init();
     applyFilters();

@@ -731,6 +731,23 @@ code {
   #map { height: 55vh; }
   nav.topnav { padding: 0 1rem; }
   nav.topnav a.link { padding: 0.85rem 0.55rem; font-size: 0.84rem; }
+  /* seven links exceed a phone's width: the row scrolls inside itself
+     (scrollbar hidden) so the page itself never scrolls sideways */
+  nav.topnav .links {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+  nav.topnav .links::-webkit-scrollbar { display: none; }
+  nav.topnav a.link { flex: none; }
+  /* playback row: button + slider + date exceed a phone's width side
+     by side; let the row wrap instead of pushing the page wider */
+  .playback { flex-wrap: wrap; }
+  .playback input[type="range"] { min-width: 0; flex-basis: 100%; order: 3; }
+  .pb-date { white-space: normal; }
 }
 
 /* ============================================================== */

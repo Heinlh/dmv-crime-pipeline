@@ -41,6 +41,7 @@ JURISDICTION_LABELS = {
     "moco": "Montgomery County",
     "pgc": "Prince George's County",
     "fairfax": "Fairfax County",
+    "pwc": "Prince William County",
 }
 CATEGORY_LABELS = {
     "homicide": "Homicide / Fatal Violence",
