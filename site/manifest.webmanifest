@@ -1,7 +1,7 @@
 {
   "name": "DMV Crime Watch",
   "short_name": "DMV Crime",
-  "description": "Daily-updated public crime data for Washington DC, Montgomery County, and Prince George's County: map, trends, events, and a daily brief.",
+  "description": "Daily-updated public crime data for Washington DC and the Maryland and Virginia suburbs: map, trends, events, and a daily brief.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

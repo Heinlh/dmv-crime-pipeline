@@ -9,12 +9,14 @@ const JURISDICTION_LABELS = {
   moco: "Montgomery County",
   pgc: "Prince George's County",
   fairfax: "Fairfax County",
+  pwc: "Prince William County",
 };
-// Line-chart series only: neon cyan / magenta / amber / green. Checked
-// for colorblind separation (worst all-pairs CVD deltaE 25+ deutan) and
-// 3:1 contrast on the chart surface; series always carry a legend and
-// tooltips. Never used for categories.
-const JURISDICTION_COLORS = { dc: "#4de3ff", moco: "#d17bff", pgc: "#ffb454", fairfax: "#3ddc97" };
+// Line-chart series only: neon cyan / magenta / amber / green / pink.
+// All pairs clear 3:1 contrast on the chart surface; the tightest CVD
+// pairs sit in the floor band, which is acceptable ONLY because every
+// chart carries a legend, index-mode tooltips naming each series, and a
+// table view. Never used for categories.
+const JURISDICTION_COLORS = { dc: "#4de3ff", moco: "#d17bff", pgc: "#ffb454", fairfax: "#3ddc97", pwc: "#ff8fab" };
 
 // Colors keep the requested hue per category (dark red, orange-red,
 // purple, blue, teal, amber, gray) with lightness adjusted where needed
