@@ -2,8 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.basemaps.cartocdn.com; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self' https://buttondown.com">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>About - DMV Crime Watch</title>
+<meta name="description" content="How this dashboard works: sources, update cadence, taxonomy, and honest caveats.">
+<meta name="theme-color" content="#0a0a14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta property="og:site_name" content="DMV Crime Watch">
+<meta property="og:type" content="website">
+<meta property="og:title" content="About DMV Crime Watch">
+<meta property="og:description" content="How this dashboard works: sources, update cadence, taxonomy, and honest caveats.">
+<meta property="og:url" content="https://heinlh.github.io/dmv-crime-pipeline/about.html">
+<meta property="og:image" content="https://heinlh.github.io/dmv-crime-pipeline/og/daily.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'%3E%3Ctext x='2' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%234de3ff'%3ED%3C/text%3E%3Ctext x='12' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23d17bff'%3EM%3C/text%3E%3Ctext x='23' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23ffb454'%3EV%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +34,7 @@
     <a class="link" href="daily.html">Daily Brief</a>
     <a class="link" href="alerts.html">Alerts</a>
     <a class="link active" href="about.html">About</a>
+    <a class="link" href="contact.html">Contact</a>
   </div>
 </nav>
 <main>
@@ -32,18 +47,18 @@
     <p>
       DMV Crime Watch pulls official, public crime reports for the DMV
       area, currently <strong>Washington DC</strong>,
-      <strong>Montgomery County, MD</strong>, and
-      <strong>Prince George's County, MD</strong>, into one place,
+      <strong>Montgomery County, MD</strong>,
+      <strong>Prince George's County, MD</strong>, and
+      <strong>Fairfax County, VA</strong>, into one place,
       refreshed automatically every day. The <a href="index.html">Map</a>
       shows where recent incidents happened, <a href="trends.html">Trends</a>
       shows how activity has changed over any period back to 2016,
       <a href="events.html">Events</a> lets you search individual reports
       from the last 90 days, and the <a href="daily.html">Daily Brief</a>
       summarizes the latest data day (also available
-      <a href="alerts.html">by email</a>). Northern Virginia is on the
-      roadmap: Fairfax County publishes usable open data we plan to add;
-      Arlington County stopped publishing machine-readable incident data
-      in 2022, so it can't be included until the county resumes.
+      <a href="alerts.html">by email</a>). Arlington County stopped
+      publishing machine-readable incident data in 2022, so it can't be
+      included until the county resumes.
     </p>
   </div>
 
@@ -61,6 +76,12 @@
         data <strong>weekly</strong>, so PG County incidents trail the
         daily sources by up to a week. Addresses are rounded to the
         block by the county.</li>
+      <li><strong>Fairfax County:</strong> FCPD's public "Crimes Against"
+        feature services (the data behind the county's own crime mapping
+        dashboard), NIBRS classified and updated hourly by the county.
+        FCPD publishes offense, date, police district, and an offset
+        map point, but no street address, so Fairfax incidents show
+        their district instead of a block address.</li>
       <li>Every agency publishes with a lag, so this site says
         <strong>"as of last published data," never "live."</strong></li>
     </ul>
@@ -116,6 +137,8 @@
     cross-jurisdiction taxonomy, and a dependency-free static front end,
     refreshed daily by GitHub Actions.
    &middot; <a href="privacy.html">Privacy policy</a>
+  
+    <p class="footer-donate">Donations are not expected but greatly appreciated :) They help keep the site maintained and fund new features. <a href="https://buymeacoffee.com/heinlinnhtu" rel="noopener">Buy me a coffee</a>.</p>
   </footer>
 </main>
 </body>

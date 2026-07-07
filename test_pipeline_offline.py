@@ -100,9 +100,37 @@ pgc_records = [
      "latitude": "38.8570", "longitude": "-76.8880"},
 ]
 
+# Fairfax: victim/offense-level rows. The first two share an
+# IncidentNumber (two victims, one aggravated + one simple assault row)
+# and must dedupe to ONE incident keeping the more severe offense.
+fairfax_records = [
+    {"UniqueID": "aaa-1", "DateReported": ms(RECENT_B), "BeginDate": ms(RECENT_B - timedelta(hours=2)),
+     "IBRCode": "13A", "IncidentNumber": "20260010001 ",
+     "ViolationCodeReference_Descript": "ASSAULT - AGGRAVATED (13A) ",
+     "Category": "Aggravated Assault", "Station": "6", "PatrolArea": "601",
+     "DISTRICT": "MASON", "latitude": "38.7984", "longitude": "-77.1560"},
+    {"UniqueID": "aaa-2", "DateReported": ms(RECENT_B), "BeginDate": ms(RECENT_B - timedelta(hours=2)),
+     "IBRCode": "13B", "IncidentNumber": "20260010001 ",
+     "ViolationCodeReference_Descript": "ASSAULT - SIMPLE, NOT AGGRAVATED (13B) ",
+     "Category": "Simple Assault", "Station": "6", "PatrolArea": "601",
+     "DISTRICT": "MASON", "latitude": "38.7984", "longitude": "-77.1560"},
+    {"UniqueID": "bbb-1", "DateReported": ms(RECENT_B), "BeginDate": ms(RECENT_B - timedelta(hours=9)),
+     "IBRCode": "240", "IncidentNumber": "20260010002",
+     "ViolationCodeReference_Descript": "MOTOR VEHICLE THEFT (240) ",
+     "Category": "Motor Vehicle Theft", "Station": "7", "PatrolArea": "710",
+     "DISTRICT": "BRADDOCK", "latitude": "38.8011", "longitude": "-77.2740"},
+    # Society-service schema: ReportDate + IBRDescription/EventDescription,
+    # no DISTRICT or Category; proves the fairfax COALESCEs work
+    {"UniqueID": "ccc-1", "ReportDate": ms(RECENT_B), "BeginDate": ms(RECENT_B - timedelta(hours=1)),
+     "IBRCode": "35A", "IncidentNumber": "20260010003",
+     "IBRDescription": "DRUG/NARCOTIC VIOLATIONS", "EventDescription": "NARCOTICS COMPLAINT",
+     "Station": "3", "PatrolArea": "302", "latitude": "38.8500", "longitude": "-77.3000"},
+]
+
 land_raw(moco_records, "moco")
 land_raw(dc_records, "dc")
 land_raw(pgc_records, "pgc")
+land_raw(fairfax_records, "fairfax")
 load_duckdb.run()
 load_duckdb.run()  # second run proves idempotency (no duplicate keys)
 export_site_data.run()
@@ -118,7 +146,7 @@ print("\n--- daily_counts ---")
 print(con.execute("SELECT * FROM marts.daily_counts ORDER BY occurred_date").df().to_string(index=False))
 
 n = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
-assert n == 9, f"expected 9 unique incidents, got {n}"
+assert n == 12, f"expected 12 unique incidents, got {n}"
 dup = con.execute("SELECT occurred_at FROM marts.fct_incidents WHERE incident_key='moco-201234567'").fetchone()[0]
 assert str(dup).startswith(RECENT_A_FIX.strftime("%Y-%m-%d %H:%M")), "dedupe should keep the latest version"
 geo = con.execute("SELECT latitude FROM marts.fct_incidents WHERE incident_key='dc-26098766'").fetchone()[0]
@@ -137,6 +165,9 @@ expected_categories = {
     "dc-26098767": "sexual",        # SEX ABUSE
     "pgc-PGC0001": "vehicle",       # THEFT FROM AUTO (new-gen columns)
     "pgc-PGC0002": "homicide",      # HOMICIDE (old-gen columns, coalesced)
+    "fairfax-20260010001": "violent",  # two victim rows deduped to one incident
+    "fairfax-20260010002": "vehicle",  # MOTOR VEHICLE THEFT
+    "fairfax-20260010003": "disorder", # society-schema DRUG/NARCOTIC row
 }
 for key, expected in expected_categories.items():
     assert categories[key] == expected, f"{key}: expected {expected}, got {categories[key]}"
@@ -147,16 +178,58 @@ incidents = json.loads((SITE_DATA_DIR / "incidents.json").read_text())
 trends = json.loads((SITE_DATA_DIR / "trends.json").read_text())
 heatmap = json.loads((SITE_DATA_DIR / "heatmap.json").read_text())
 
-assert summary["total_records"] == 9
+assert summary["total_records"] == 12
 assert summary["data_start_date"] == "2016-08-15", summary["data_start_date"]
+
+# fairfax dedupe details: severity of the surviving row is the aggravated one
+ffx = con.execute("""
+    SELECT offense_raw, severity_weight, area_name FROM marts.fct_incidents
+    WHERE incident_key = 'fairfax-20260010001'
+""").fetchone()
+assert "AGGRAVATED" in ffx[0] and ffx[1] == 8, ffx
+assert ffx[2] == "Mason District", ffx
 assert heatmap["rows"], "heatmap should have rows"
 assert heatmap["columns"] == ["weekday", "hour", "jurisdiction", "offense_category", "count"], heatmap["columns"]
 
 digest = json.loads((SITE_DATA_DIR / "digest.json").read_text())
 assert digest["latest_day"], "digest must identify the latest data day"
 assert digest["bullets"] and any("incidents were reported" in b for b in digest["bullets"]), digest["bullets"]
-assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc"}
+assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc", "fairfax"}
 assert digest["notable"], "digest should list notable incidents"
+assert "signals" in digest, "digest must carry the anomaly signals list"
+for sig in digest["signals"]:
+    assert sig["baseline"] >= 3.0, "signals must respect the baseline floor"
+    assert sig["direction"] in ("spike", "lull")
+
+# --- hotspot hexes ---
+hexes = json.loads((SITE_DATA_DIR / "hexes.json").read_text())
+assert hexes["resolution"] == 8
+assert set(hexes["windows"].keys()) == {"7", "30"}, hexes["windows"].keys()
+assert hexes["columns"] == ["hex", "count", "top_category"]
+cells_30 = hexes["windows"]["30"]
+assert cells_30, "30-day window should have hex cells from the recent fixtures"
+for cell, count, top_cat in cells_30:
+    assert cell in hexes["boundaries"], f"cell {cell} missing boundary"
+    assert len(hexes["boundaries"][cell]) == 6, "H3 cells are hexagons"
+    assert count >= 1
+# 7-day counts can never exceed the same cell's 30-day counts
+counts_30 = {c: n for c, n, _ in cells_30}
+for cell, count, _ in hexes["windows"]["7"]:
+    assert count <= counts_30.get(cell, 0), f"7d > 30d for {cell}"
+
+# --- populations for per-capita rates ---
+assert summary["populations"]["dc"] > 600000
+assert set(summary["populations"]) == {"dc", "moco", "pgc", "fairfax"}
+
+# --- OG share card renders from the digest ---
+from export import render_og_card  # noqa: E402
+
+render_og_card.OG_DIR = _tmp / "og"  # keep the test out of the real site/og
+og_svg = render_og_card.build_svg(digest)
+assert og_svg.startswith("<svg") and "CRIME WATCH" in og_svg
+render_og_card.run()
+og_png = render_og_card.OG_DIR / "daily.png"
+assert og_png.exists() and og_png.stat().st_size > 10000, "OG card PNG should render"
 
 # --- the email newsletter builds from the same digest ---
 from export.send_digest_email import build_html, build_narrative  # noqa: E402
@@ -180,5 +253,6 @@ assert dc2[geo_idx] is None, "nulled geocode must survive export"
 trend_dates = {r[0] for r in trends["rows"]}
 assert "2016-08-15" in trend_dates, "full-history trends must include the 2016 record"
 assert all(len(r) == 4 for r in trends["rows"]), "trends rows are [date, jurisdiction, category, count]"
+assert trends["populations"] == summary["populations"], "populations must ship with trends.json"
 
 print("\nAll assertions passed: dedupe, idempotency, geocode nulling, taxonomy mapping, site export.")

@@ -81,6 +81,22 @@ function renderLast14(digest) {
     `${latest > avg * 1.1 ? "above" : latest < avg * 0.9 ? "below" : "near"} the 14 day average of ${avg.toFixed(0)}.`;
 }
 
+function renderSignals(digest) {
+  const box = document.getElementById("signals");
+  const signals = digest.signals || [];
+  if (!signals.length) {
+    box.innerHTML = `<p class="signal-none">No slice of the data strayed far from its 8-week baseline. All quiet on the statistical front.</p>`;
+    return;
+  }
+  box.innerHTML = signals.map(s => `
+    <div class="signal ${s.direction === "spike" ? "spike" : "lull"}">
+      <span class="dir">${s.direction === "spike" ? "&#9650; SPIKE" : "&#9660; LULL"}</span>
+      <span class="what">${esc(categoryLabel(s.offense_category))} &middot; ${esc(jurisdictionLabel(s.jurisdiction))}</span>
+      <span class="nums mono">${s.count} vs typical ${s.baseline.toFixed(0)} (&times;${s.ratio.toFixed(1)})</span>
+    </div>
+  `).join("");
+}
+
 function renderNotable(digest) {
   const grid = document.getElementById("notable");
   if (!digest.notable.length) {
@@ -108,6 +124,7 @@ async function init() {
     const digest = await fetchJson("data/digest.json");
     if (!digest.latest_day) throw new Error("no data in digest");
     renderBullets(digest);
+    renderSignals(digest);
     renderDayCategories(digest);
     renderLast14(digest);
     renderNotable(digest);
