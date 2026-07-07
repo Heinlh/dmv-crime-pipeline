@@ -75,6 +75,29 @@ FAIRFAX = {
     ],
 }
 
+# Prince William County: PWC Police "Public_Crime_Reports" hosted
+# feature layer (discovered via probe.yml; the layer behind the county's
+# public Crime Data Explorer). Updated once daily by the county; data
+# covers a ROLLING 3-year window. Locations are mapped to the nearest
+# 100 block by the county, and sexual offense records are withheld by
+# the county for victim privacy (so this jurisdiction structurally
+# undercounts the 'sexual' category; the About page says so). The layer
+# stores state-plane geometry, so queries request outSR=4326. Reports
+# can be filed days after the offense and the layer has no report-date
+# column, so the extractor re-pulls a deep overlap window each run.
+PWC_VA = {
+    "source_name": "pwc",
+    "base_url": "https://services2.arcgis.com/0Q7l03Ls62VG0fy4/arcgis/rest/services/Public_Crime_Reports/FeatureServer",
+    "layer_id": 0,
+    "watermark_field": "OccurredOn",  # esri epoch-millis timestamp
+    "page_size": 2000,  # layer maxRecordCount is 2000
+    "out_fields": [
+        "InstanceID", "CaseNo", "OccurredOn", "OccurredBetween",
+        "BlockAddress", "City", "State", "ZipCode",
+        "IBRCode", "CrimeCategory",
+    ],
+}
+
 # DC: MPD FEEDS FeatureServer on maps2.dcgis.dc.gov.
 # DC publishes one "Crime Incidents in YYYY" layer per calendar year. The
 # extractor discovers the year -> layer id map from the FeatureServer's

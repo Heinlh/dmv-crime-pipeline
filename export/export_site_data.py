@@ -49,6 +49,7 @@ POPULATIONS = {
     "moco": 1058474,
     "pgc": 946971,
     "fairfax": 1147532,
+    "pwc": 482204,
 }
 
 NOW = "CAST(now() AS TIMESTAMP)"
@@ -66,6 +67,7 @@ JURISDICTION_LABELS = {
     "moco": "Montgomery County",
     "pgc": "Prince George's County",
     "fairfax": "Fairfax County",
+    "pwc": "Prince William County",
 }
 CATEGORY_LABELS = {
     "homicide": "Homicide / Fatal Violence",
