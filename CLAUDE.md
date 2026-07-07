@@ -2,17 +2,20 @@
 
 ETL pipeline ingesting public crime data for the DMV area into a unified
 DuckDB warehouse. Currently covers Montgomery County MD (Socrata),
-Washington DC (ArcGIS), and Prince George's County MD (Socrata, updated
-weekly by the county). Built as a portfolio project demonstrating
-analytics engineering: incremental extraction, raw/marts layering,
-cross-jurisdiction taxonomy mapping, and idempotent loads.
+Washington DC (ArcGIS), Prince George's County MD (Socrata, updated
+weekly by the county), and Fairfax County VA (FCPD "Crimes Against"
+ArcGIS services, updated hourly by the county). Built as a portfolio
+project demonstrating analytics engineering: incremental extraction,
+raw/marts layering, cross-jurisdiction taxonomy mapping, and idempotent
+loads.
 
 ## Commands
 
-- `python run_pipeline.py` runs extract (all sources), load, transform, and site export
+- `python run_pipeline.py` runs extract (all sources), load, transform, site export, and OG card render
 - `python test_pipeline_offline.py` full offline smoke test, no network needed
-- `python -m extractors.moco` / `.dc` / `.pgc` run one extractor
+- `python -m extractors.moco` / `.dc` / `.pgc` / `.fairfax` run one extractor
 - `python -m export.export_site_data` regenerate `site/data/` without re-extracting
+- `python -m export.render_og_card` re-render `site/og/daily.png` from digest.json
 - `python -m export.send_digest_email` send the daily digest via Buttondown
   (silent no-op without BUTTONDOWN_API_KEY)
 - `cd site && python -m http.server 8000` preview the static site locally (fetch() needs http://, not file://)
@@ -24,23 +27,42 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   First run (no watermark) backfills from `BACKFILL_START` (July 2016).
   The DC extractor discovers its per-year layer ids from the FeatureServer
   at runtime, falling back to `DC["fallback_year_layers"]` in config.py.
+  The Fairfax extractor reads each FCPD service's field list at runtime
+  (the three services have divergent schemas) and requests ONLY the
+  fields in `FAIRFAX["desired_fields"]`; the services also publish
+  victim demographics and officer identifiers, which are deliberately
+  never pulled. Fairfax rows are victim/offense level; the transform
+  dedupes to one incident per IncidentNumber keeping the most severe
+  offense row.
 - `load/load_duckdb.py` rebuilds raw tables from parquet (padding any
   columns a sparse batch omitted), runs `sql/transform.sql`
 - `sql/schema.sql` DDL for raw schema, `marts.dim_offense_map`,
   `marts.fct_incidents`, `marts.daily_counts` view
 - `export/export_site_data.py` snapshots the warehouse into `site/data/`
-  (gitignored, regenerated every run): `summary.json` KPIs,
+  (gitignored, regenerated every run): `summary.json` KPIs + POPULATIONS,
   `incidents.json` incident-level last 90 days in columnar form (feeds
   the map and events search), `trends.json` daily counts by jurisdiction
-  and category over the full history (feeds any trends period back to
-  2016), `heatmap.json` weekday x hour x jurisdiction x category last
-  90 days (the site folds hours into dayparts), `digest.json` daily
-  brief for the latest data day (bullets, comparisons, notable
-  incidents; feeds both site/daily.html and the email digest)
+  and category over the full history plus jurisdiction populations
+  (feeds any trends period back to 2016 and the per-100k toggle),
+  `heatmap.json` weekday x hour x jurisdiction x category last 90 days
+  (the site folds hours into dayparts), `hexes.json` H3 resolution-8
+  cell counts for 7 and 30 day windows with boundary polygons
+  precomputed server-side (the client needs no H3 library), `digest.json`
+  daily brief for the latest data day (bullets, comparisons, notable
+  incidents, plus `signals`: per jurisdiction x category same-weekday
+  8-week anomaly detection, baseline floor 3.0, spike >= 1.5x, lull
+  <= 0.5x; feeds site/daily.html and the email digest).
+  POPULATIONS are U.S. Census Bureau Vintage 2023 estimates and exist
+  ONLY in export_site_data.py on the Python side (trends.json/summary.json
+  carry them to the browser).
+- `export/render_og_card.py` renders `site/og/daily.png` (1200x630 Open
+  Graph share card) from digest.json via hand-composed SVG + cairosvg,
+  no headless browser; every page's `og:image` points at it with
+  absolute URLs. site/og/ is gitignored and regenerated every run.
 - `site/` static HTML/CSS/JS (Leaflet + markercluster + Chart.js via CDN,
-  no build step, no framework) reading `site/data/`; seven pages (Map =
-  index, Trends, Events, Daily Brief, Alerts, About, Privacy), nav
-  repeated per page. Incident titles are factual composites built only
+  no build step, no framework) reading `site/data/`; eight pages (Map =
+  index, Trends, Events, Daily Brief, Alerts, About, Contact, Privacy),
+  nav repeated per page. Incident titles are factual composites built only
   from published fields via `friendlyOffense`/`incidentTitle` in
   common.js; the agency's own label always stays visible on the card. Retro neon
   cyberpunk theme, dark-only: design tokens in `:root` of
@@ -52,49 +74,118 @@ cross-jurisdiction taxonomy mapping, and idempotent loads.
   labels/colors/formatters plus `esc()` -- API-derived strings are always
   escaped before innerHTML, and raw `offense_category` values never
   reach the UI unlabeled.
+- Cinematic layer ("cinematic but clear"): HUD corner brackets on cards
+  and panels, nav scanline sweep, brand glitch on hover, blinking kicker
+  cursor, KPI count-up (`countUp` in common.js). EVERY moving part is
+  gated behind `prefers-reduced-motion: no-preference`; reduced-motion
+  users get the identical static design and the map playback's autoplay
+  button is hidden entirely (manual stepping still works).
+- Map extras: `hotspotGroup` hex layer (Off/7d/30d select, default 30d,
+  single-hue cyan fill under the dots, tooltips with count + top
+  category, explicitly framed as "where reports cluster", never
+  predictive), and a day-by-day playback scrubber over the last 30 days
+  anchored to the newest incident.
+- Map search (`mapSearch` in home.js): a Google-Maps-style floating
+  search box over the top-left of the map (zoom control moved to
+  top-right). Suggestions (crime types + places: wards/districts/cities/
+  jurisdictions) are built ENTIRELY from the loaded incidents, so no
+  query ever reaches a third-party geocoder. Selecting one sets a
+  free-text term (`mapSearchTerm`, matched against the same haystack as
+  Events), reruns the filters, and fits the map to the matches; the term
+  rides in the Map hash as `q` so searches are shareable. Leaflet event
+  propagation is disabled on the overlay so interacting with it never
+  pans the map.
+- Shareable URL state: filter state lives in the location hash on Map
+  (j/days/cat/sev/hex/day), Trends (preset/from/to/gran/j/cat/rate), and
+  Events (q/j/cat/days/sort) via `readHashState`/`writeHashState` in
+  common.js. Ctrl+K / Cmd+K command palette (vanilla JS in common.js)
+  jumps between pages, applies canned filters, and forwards free text to
+  the Events search via `events.html#q=`.
+- Trends per-capita: COUNTS / PER 100K toggle divides by jurisdiction
+  populations; combined figures use the union region's summed
+  population, never summed rates. `ACTIVE_JURISDICTIONS` narrows to
+  jurisdictions that actually have data so a newly added source cannot
+  draw a phantom zero series or dilute denominators.
+- PWA: `site/manifest.webmanifest` + `site/sw.js` (network-first,
+  cache fallback, same-origin GETs only) + `site/icons/` (committed,
+  generated from the DMV mark). All paths relative so the scope works
+  under GitHub Pages project hosting.
 - `.github/workflows/pipeline.yml` daily cron: restore `data/raw` +
   `state/` from the Actions cache (runs are incremental; a cache miss
   triggers a full, safe re-backfill), run the pipeline, deploy `site/`
   to GitHub Pages via `actions/deploy-pages`
+- `.github/workflows/probe.yml` workflow_dispatch curl probe, used to
+  reconnoiter external API schemas from CI (this is how the FCPD
+  services and their layer ids/fields were discovered)
 - Warehouse file: `data/warehouse/crime.duckdb` (gitignored)
 
 ## Conventions and invariants
 
 - Raw means raw: the landing zone stores API responses untouched, all
   strings. All typing and cleaning happens in SQL, never in extractors.
+  (Field *selection* at the API level is allowed and used for Fairfax to
+  avoid ever landing victim demographics.)
 - Everything idempotent: raw tables are full rebuilds, fct_incidents uses
   INSERT OR REPLACE on incident_key ('{jurisdiction}-{source_id}').
 - Locations stay block-level as published. Failed geocodes become NULL,
-  never guessed or sharpened.
+  never guessed or sharpened. Hex hotspot cells (~0.7 km2) are coarser
+  than block level by construction. FCPD publishes no street addresses,
+  so Fairfax incidents show their police district as area_name.
 - Unified taxonomy: homicide, violent, sexual, property, vehicle,
   disorder, other, with severity_weight 1 to 10. DC maps via
-  dim_offense_map (closed set of nine offenses); MoCo maps via keyword
-  rules in transform.sql. Display metadata (labels, colors,
-  descriptions, examples) lives ONLY in site/js/common.js CATEGORIES
-  (CSS variables in site/css/style.css mirror the colors).
+  dim_offense_map (closed set of nine offenses); MoCo, PGC, and Fairfax
+  map via keyword rules in transform.sql. Display metadata (labels,
+  colors, descriptions, examples) lives ONLY in site/js/common.js
+  CATEGORIES (CSS variables in site/css/style.css mirror the colors).
+- Anomaly signals are statistics, not judgments: same-weekday 8-week
+  baseline, floor of 3.0 so thin slices (e.g. one homicide vs a near-zero
+  average) never masquerade as spikes; always presented with the
+  baseline number and "one day is noise" framing.
 - No em dashes in any prose, docs, or comments.
 - Requires SOCRATA_APP_TOKEN env var for reasonable MoCo/PGC rate limits.
 - NO PII in this repo or the static site, ever: email signups post
   directly to Buttondown (set BUTTONDOWN_USERNAME in site/js/common.js;
   BUTTONDOWN_API_KEY repo secret enables the daily email); subscriber
-  data and signup counts live only in Buttondown's dashboard.
+  data and signup counts live only in Buttondown's dashboard. Fairfax
+  victim demographics and officer identifiers are never requested from
+  the FCPD services.
 - Incident titles must be traceable to published data fields; never
   compose narrative details the agency did not publish.
+- Nothing on the site is predictive: hotspots and signals describe
+  published reports, and the copy says so explicitly.
+- Security posture: all API-derived strings are escaped via `esc()`
+  before innerHTML; all SQL timestamp bounds are laundered through Python
+  `datetime` objects before string interpolation (never raw API strings);
+  extractors select fields at the API level but never eval/shell/pickle;
+  secrets come from env only. Every page ships a Content-Security-Policy
+  meta tag (default-src 'self'; scripts/styles limited to self + the
+  pinned CDNs; img to self/data/carto; connect 'self'; form-action to
+  Buttondown). The map search is deliberately geocoder-free so no query
+  leaves the browser. Clickjacking protection (frame-ancestors) needs an
+  HTTP header GitHub Pages cannot set; CDN scripts could additionally use
+  Subresource Integrity if the project ever pins exact hashes.
 - Arlington County has no machine-readable feed since mid-2022 (excluded
-  until the county resumes); Fairfax County is the next candidate, use
-  .github/workflows/probe.yml to inspect its ArcGIS schema first.
+  until the county resumes).
 
 ## Roadmap (in order)
 
-1. Migrate transform.sql to a dbt project (dbt-duckdb): staging models,
-   seeds for offense mapping, schema tests
-2. Priority-case scoring (severity x recency x cluster bonus) and daily digest
-3. H3 hex hotspot layer on the map (7 day window)
-4. Add Prince George's County and NoVA sources
-5. Local news RSS matching, Census per-capita normalization
+1. Migrate transform.sql to a dbt project following docs/dbt-migration.md
+   (step-by-step guide: dbt-duckdb profile, sources, staging models,
+   offense-map seed, marts, schema tests, CI wiring, parity validation)
+2. Priority-case scoring (severity x recency x cluster bonus)
+3. Local news RSS matching
+4. Azure migration when GitHub Actions free minutes get tight ($100
+   credit available; containerize the pipeline, keep Pages or move to
+   Static Web Apps)
 
 Done: GitHub Actions daily cron (`.github/workflows/pipeline.yml`), Leaflet
 map with hover tooltips and incident summary cards, full-history trends
 dashboard with period and granularity pickers, searchable events page,
-2016+ backfill carried across runs by the Actions cache, dark themed
-four-page site.
+2016+ backfill carried across runs by the Actions cache, dark neon
+cyberpunk theme, PG County + Fairfax County sources, Daily Brief page +
+Buttondown email digest with designed HTML newsletter, factual incident
+titles, privacy policy + contact pages, H3 hex hotspot layer (7d/30d),
+Census per-capita toggle, anomaly signals in the digest/brief/newsletter,
+day-by-day map playback, Ctrl+K command palette, shareable URL state,
+Python-rendered daily OG share card, PWA shell, cinematic-but-clear
+theme pass (all motion behind prefers-reduced-motion).

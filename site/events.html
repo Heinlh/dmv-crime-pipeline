@@ -2,8 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.basemaps.cartocdn.com; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self' https://buttondown.com">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Events - DMV Crime Watch</title>
+<meta name="description" content="Search and filter individual incidents from the last 90 days across DC, Montgomery County, and Prince George's County.">
+<meta name="theme-color" content="#0a0a14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta property="og:site_name" content="DMV Crime Watch">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Search DMV crime reports">
+<meta property="og:description" content="Search and filter individual incidents from the last 90 days across DC, Montgomery County, and Prince George's County.">
+<meta property="og:url" content="https://heinlh.github.io/dmv-crime-pipeline/events.html">
+<meta property="og:image" content="https://heinlh.github.io/dmv-crime-pipeline/og/daily.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'%3E%3Ctext x='2' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%234de3ff'%3ED%3C/text%3E%3Ctext x='12' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23d17bff'%3EM%3C/text%3E%3Ctext x='23' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23ffb454'%3EV%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +34,7 @@
     <a class="link" href="daily.html">Daily Brief</a>
     <a class="link" href="alerts.html">Alerts</a>
     <a class="link" href="about.html">About</a>
+    <a class="link" href="contact.html">Contact</a>
   </div>
 </nav>
 <main>
@@ -73,6 +88,8 @@
     preliminary and subject to change by the agencies. Locations are
     block-level as published.
    &middot; <a href="privacy.html">Privacy policy</a>
+  
+    <p class="footer-donate">Donations are not expected but greatly appreciated :) They help keep the site maintained and fund new features. <a href="https://buymeacoffee.com/heinlinnhtu" rel="noopener">Buy me a coffee</a>.</p>
   </footer>
 </main>
 <script src="js/common.js"></script>

@@ -19,10 +19,32 @@ Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 let rows = [];          // [{date: "YYYY-MM-DD", jurisdiction, category, count}]
 let heatmapPayload = null;
+let populations = {};   // jurisdiction -> residents (shipped in trends.json)
 let minDate = "2016-07-01";
 let maxDate = null;
-const state = { from: null, to: null, granularity: "month", jurisdiction: "", category: "" };
+const state = { from: null, to: null, granularity: "month", jurisdiction: "", category: "",
+                rate: "count", preset: "all" };
 const charts = {};      // canvas id -> Chart instance
+
+// --------------------------------------------------- per-capita rates
+// "Per 100k" divides counts by the jurisdiction's population (U.S.
+// Census Bureau Vintage 2023 estimates, shipped in trends.json). A
+// combined series or total uses the summed population of the
+// jurisdictions it covers, i.e. the rate of the union region.
+
+function popOf(jurs) {
+  return jurs.reduce((s, j) => s + (populations[j] || 0), 0);
+}
+
+function toRate(count, pop) {
+  return pop ? count / pop * 100000 : 0;
+}
+
+function fmtMeasure(value) {
+  return state.rate === "per100k"
+    ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : value.toLocaleString();
+}
 
 // Dayparts for the "when are incidents reported" heatmap. Night wraps
 // past midnight; each hour is attributed to its own calendar day.
@@ -35,7 +57,10 @@ const DAYPARTS = [
 // Display rows Monday..Sunday; the export's weekday uses 0 = Sunday.
 const DAY_ROWS = [1, 2, 3, 4, 5, 6, 0];
 
-const ALL_JURISDICTIONS = Object.keys(JURISDICTION_LABELS);
+// Every known jurisdiction, narrowed on load to the ones that actually
+// have data (a newly added source should not draw a phantom zero series
+// or dilute per-100k denominators before its history exists).
+let ACTIVE_JURISDICTIONS = Object.keys(JURISDICTION_LABELS);
 
 // --------------------------------------------------- date helpers
 
@@ -84,6 +109,7 @@ function enumerateBuckets(fromIso, toIso_, granularity) {
 // ------------------------------------------------- period selection
 
 function setPeriod(fromIso, toIso_, preset) {
+  state.preset = preset;
   state.from = fromIso < minDate ? minDate : fromIso;
   state.to = toIso_ > maxDate ? maxDate : toIso_;
   document.getElementById("f-from").value = state.from.slice(0, 7);
@@ -169,8 +195,17 @@ function renderPeriodCards(slice) {
   const total = slice.reduce((s, r) => s + r.count, 0);
   const byJur = totalsBy(slice, r => r.jurisdiction);
   const spanDays = Math.max(1, Math.round((parseDay(state.to) - parseDay(state.from)) / dayMs) + 1);
-  const jurs = state.jurisdiction ? [state.jurisdiction] : ALL_JURISDICTIONS;
-  const cards = [
+  const jurs = state.jurisdiction ? [state.jurisdiction] : ACTIVE_JURISDICTIONS;
+  const perCapita = state.rate === "per100k";
+  const cards = perCapita ? [
+    { label: "Total (per 100k residents)", value: fmtMeasure(toRate(total, popOf(jurs))) },
+    ...jurs.map(j => ({
+      label: `${jurisdictionLabel(j)} (per 100k)`,
+      value: fmtMeasure(toRate(byJur[j] || 0, popOf([j]))),
+      sub: `${(byJur[j] || 0).toLocaleString()} incidents`,
+    })),
+    { label: "Daily Avg (per 100k)", value: fmtMeasure(toRate(total / spanDays, popOf(jurs))) },
+  ] : [
     { label: "Total Incidents", value: fmtNumber(total) },
     ...jurs.map(j => ({
       label: jurisdictionLabel(j), value: fmtNumber(byJur[j] || 0),
@@ -193,11 +228,16 @@ function renderPeriodCards(slice) {
 function renderVolume(slice) {
   const buckets = enumerateBuckets(state.from, state.to, state.granularity);
   const byBucket = aggregate(slice, r => r.jurisdiction);
-  const jurisdictions = state.jurisdiction ? [state.jurisdiction] : ALL_JURISDICTIONS;
+  const jurisdictions = state.jurisdiction ? [state.jurisdiction] : ACTIVE_JURISDICTIONS;
+  const perCapita = state.rate === "per100k";
 
-  const datasets = jurisdictions.map(j => ({
-    label: jurisdictionLabel(j),
-    data: buckets.map(b => (byBucket.get(b) || {})[j] || 0),
+  const countSeries = jurisdictions.map(j =>
+    buckets.map(b => (byBucket.get(b) || {})[j] || 0));
+  const datasets = jurisdictions.map((j, ji) => ({
+    label: jurisdictionLabel(j) + (perCapita ? " (per 100k)" : ""),
+    data: perCapita
+      ? countSeries[ji].map(c => toRate(c, popOf([j])))
+      : countSeries[ji],
     borderColor: JURISDICTION_COLORS[j],
     backgroundColor: JURISDICTION_COLORS[j],
     borderWidth: 2,
@@ -213,25 +253,37 @@ function renderVolume(slice) {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: jurisdictions.length > 1, labels: { boxWidth: 18, boxHeight: 2 } } },
+      plugins: {
+        legend: { display: jurisdictions.length > 1, labels: { boxWidth: 18, boxHeight: 2 } },
+        tooltip: { callbacks: { label: ctx =>
+          ` ${ctx.dataset.label}: ${fmtMeasure(ctx.parsed.y)}` } },
+      },
       scales: {
         x: { ticks: { maxTicksLimit: 12, maxRotation: 0 }, grid: { display: false } },
-        y: { beginAtZero: true, grid: { color: CHART_GRID } },
+        y: {
+          beginAtZero: true, grid: { color: CHART_GRID },
+          title: { display: perCapita, text: "incidents per 100,000 residents" },
+        },
       },
     },
   });
 
-  // caption: the peak bucket. Hover behavior on 3+ series stays "one
-  // tooltip, every series" via interaction mode index.
+  // caption: the peak bucket, always computed from raw counts (summing
+  // per-jurisdiction rates would be statistically wrong); in rate mode
+  // the combined figure uses the union region's population.
   let peakIdx = -1, peakTotal = -1;
   buckets.forEach((b, i) => {
-    const t = datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0);
+    const t = countSeries.reduce((sum, s) => sum + (s[i] || 0), 0);
     if (t > peakTotal) { peakTotal = t; peakIdx = i; }
   });
   const scopeText = state.jurisdiction ? `in ${jurisdictionLabel(state.jurisdiction)}` : "across all jurisdictions";
+  const peakText = perCapita
+    ? `${fmtMeasure(toRate(peakTotal, popOf(jurisdictions)))} reported incidents per 100k residents`
+    : `${peakTotal.toLocaleString()} reported incidents`;
   document.getElementById("caption-volume").textContent = peakIdx >= 0 && peakTotal > 0
     ? `Volume peaked ${state.granularity === "day" ? "on" : "in"} ${bucketLabel(buckets[peakIdx], state.granularity)} ` +
-      `with ${peakTotal.toLocaleString()} reported incidents ${scopeText}.`
+      `with ${peakText} ${scopeText}.` +
+      (perCapita ? " Rates use U.S. Census Bureau Vintage 2023 population estimates." : "")
     : "No incidents match the selected filters.";
 
   // table view twin
@@ -240,11 +292,15 @@ function renderVolume(slice) {
     <thead><tr><th>Period</th>${jurisdictions.map(j =>
       `<th class="num">${esc(jurisdictionLabel(j))}</th>`).join("")}<th class="num">Total</th></tr></thead>
     <tbody>${buckets.map((b, i) => {
-      const vals = datasets.map(d => d.data[i] || 0);
-      const total = vals.reduce((sum, v) => sum + v, 0);
+      const counts = countSeries.map(s => s[i] || 0);
+      const total = counts.reduce((sum, v) => sum + v, 0);
+      const vals = perCapita
+        ? counts.map((c, ji) => toRate(c, popOf([jurisdictions[ji]])))
+        : counts;
+      const totalVal = perCapita ? toRate(total, popOf(jurisdictions)) : total;
       return `<tr><td>${esc(bucketLabel(b, state.granularity))}</td>
-        ${vals.map(v => `<td class="num">${v.toLocaleString()}</td>`).join("")}
-        <td class="num">${total.toLocaleString()}</td></tr>`;
+        ${vals.map(v => `<td class="num">${fmtMeasure(v)}</td>`).join("")}
+        <td class="num">${fmtMeasure(totalVal)}</td></tr>`;
     }).join("")}
     </tbody></table>`;
 }
@@ -307,7 +363,7 @@ function renderCategory(slice) {
             label: ctx => ` ${ctx.parsed.x.toLocaleString()} incidents`,
             afterLabel: ctx => {
               const cat = cats[ctx.dataIndex];
-              return ALL_JURISDICTIONS.map(j =>
+              return ACTIVE_JURISDICTIONS.map(j =>
                 `${jurisdictionLabel(j)}: ${(byJurCat[`${j}|${cat}`] || 0).toLocaleString()}`).join("\n");
             },
           },
@@ -326,7 +382,7 @@ function renderCategory(slice) {
       `(${(totals[top] || 0).toLocaleString()} incidents). Hover a bar for the per-jurisdiction split.`
     : "No incidents in the selected period.";
 
-  const tableJurs = state.jurisdiction ? [state.jurisdiction] : ALL_JURISDICTIONS;
+  const tableJurs = state.jurisdiction ? [state.jurisdiction] : ACTIVE_JURISDICTIONS;
   const tbl = document.getElementById("category-table");
   tbl.innerHTML = `<table class="data-table">
     <thead><tr><th>Category</th>${tableJurs.map(j =>
@@ -393,6 +449,15 @@ function renderAll() {
   renderVolume(slice);
   renderCategory(slice);
   renderHeatmap();
+  writeHashState({
+    preset: state.preset === "all" ? "" : state.preset,
+    from: state.preset === "custom" ? state.from.slice(0, 7) : "",
+    to: state.preset === "custom" ? state.to.slice(0, 7) : "",
+    gran: state.granularity === "month" ? "" : state.granularity,
+    j: state.jurisdiction,
+    cat: state.category,
+    rate: state.rate === "count" ? "" : state.rate,
+  });
 }
 
 // ------------------------------------------------------------ wiring
@@ -421,6 +486,13 @@ function wireControls() {
     state.category = e.target.value;
     renderAll();
   });
+  document.querySelectorAll("#rate-buttons button").forEach(b =>
+    b.addEventListener("click", () => {
+      state.rate = b.dataset.rate;
+      document.querySelectorAll("#rate-buttons button").forEach(x =>
+        x.classList.toggle("active", x === b));
+      renderAll();
+    }));
 
   for (const [btnId, tblId, chartSel] of [
     ["toggle-volume-table", "volume-table", "#chart-volume"],
@@ -448,12 +520,39 @@ async function init() {
       ({ date, jurisdiction, category, count }));
     if (!rows.length) throw new Error("trends.json is empty");
     heatmapPayload = heatmap;
+    populations = trends.populations || {};
+    const seen = new Set(rows.map(r => r.jurisdiction));
+    ACTIVE_JURISDICTIONS = Object.keys(JURISDICTION_LABELS).filter(j => seen.has(j));
     minDate = rows[0].date;
     maxDate = rows[rows.length - 1].date;
     for (const el of ["f-from", "f-to"]) document.getElementById(el).max = maxDate.slice(0, 7);
 
     wireControls();
-    applyPreset("all");
+
+    // restore any shared-URL state before the first render
+    const h = readHashState();
+    if (h.j && ACTIVE_JURISDICTIONS.includes(h.j)) {
+      state.jurisdiction = h.j;
+      document.getElementById("f-jurisdiction").value = h.j;
+    }
+    if (h.cat && CATEGORY_ORDER.includes(h.cat)) {
+      state.category = h.cat;
+      document.getElementById("f-category").value = h.cat;
+    }
+    if (h.rate === "per100k") {
+      state.rate = "per100k";
+      document.querySelectorAll("#rate-buttons button").forEach(b =>
+        b.classList.toggle("active", b.dataset.rate === "per100k"));
+    }
+    if (h.preset === "custom" && /^\d{4}-\d{2}$/.test(h.from || "") && /^\d{4}-\d{2}$/.test(h.to || "")) {
+      document.getElementById("f-from").value = h.from;
+      document.getElementById("f-to").value = h.to;
+      onCustomRange();
+      if (["day", "week", "month"].includes(h.gran)) { setGranularity(h.gran); renderAll(); }
+    } else {
+      applyPreset(["90d", "1y", "ytd"].includes(h.preset) ? h.preset : "all");
+      if (["day", "week", "month"].includes(h.gran)) { setGranularity(h.gran); renderAll(); }
+    }
   } catch (err) {
     document.querySelector("main").insertAdjacentHTML("beforeend",
       `<p class="loading">Could not load trend data (${esc(err.message)}). Run the pipeline to generate site/data/.</p>`);

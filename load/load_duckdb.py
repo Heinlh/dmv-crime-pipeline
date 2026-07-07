@@ -20,6 +20,7 @@ SOURCES = {
     "moco": "raw.moco_incidents",
     "dc": "raw.dc_incidents",
     "pgc": "raw.pgc_incidents",
+    "fairfax": "raw.fairfax_incidents",
 }
 
 # Columns sql/transform.sql references per raw table. Socrata (and to a
@@ -44,6 +45,16 @@ EXPECTED_COLUMNS = {
         "incident_case_id", "id", "date", "clearance_code_inc_type",
         "offense", "inc_type", "street_address", "location", "address",
         "city", "zip_code", "pgpd_sector", "sector", "pgpd_beat",
+        "latitude", "longitude",
+    ],
+    # FCPD's three services use different column names (Person/Property:
+    # DateReported + ViolationCodeReference_Descript; Society: ReportDate
+    # + EventDescription/IBRDescription), so the transform coalesces and
+    # the loader pads every candidate.
+    "raw.fairfax_incidents": [
+        "UniqueID", "DateReported", "ReportDate", "BeginDate", "IBRCode",
+        "IBRDescription", "IncidentNumber", "ViolationCodeReference_Descript",
+        "EventDescription", "Category", "Station", "PatrolArea", "DISTRICT",
         "latitude", "longitude",
     ],
 }
@@ -91,6 +102,8 @@ def run() -> None:
             if "raw.dc_incidents" in statement and "dc_incidents" not in existing:
                 continue
             if "raw.pgc_incidents" in statement and "pgc_incidents" not in existing:
+                continue
+            if "raw.fairfax_incidents" in statement and "fairfax_incidents" not in existing:
                 continue
             con.execute(statement)
         total = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]

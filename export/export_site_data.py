@@ -10,8 +10,12 @@ actually needs:
                   columnar rows to keep the payload compact
   trends.json     pre-aggregated daily counts by jurisdiction and category
                   over the FULL history, so the trends page can offer any
-                  period (e.g. 2017-2020) without incident-level data
+                  period (e.g. 2017-2020) without incident-level data;
+                  carries jurisdiction populations for per-100k rates
   heatmap.json    weekday x hour counts over the last HEATMAP_WINDOW_DAYS
+  hexes.json      H3 hex-cell incident counts for the map hotspot layer,
+                  7 and 30 day windows; boundary polygons are precomputed
+                  here so the client needs no H3 library
 
 Timestamps are cast to VARCHAR in SQL so the JSON output needs no special
 datetime handling on the Python side.
@@ -21,6 +25,7 @@ import json
 import logging
 
 import duckdb
+import h3
 
 from config import SITE_DATA_DIR, WAREHOUSE_PATH
 
@@ -29,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 INCIDENT_WINDOW_DAYS = 90
 HEATMAP_WINDOW_DAYS = 90
+
+# H3 hotspot layer: resolution 8 cells average ~0.74 km2, coarse enough
+# that a cell never sharpens a block-level location, fine enough to show
+# neighborhood-scale concentrations. Windows are days of history.
+HEX_RESOLUTION = 8
+HEX_WINDOWS = (7, 30)
+
+# Jurisdiction populations, U.S. Census Bureau Vintage 2023 county/state
+# population estimates (released March 2024). Used only to express counts
+# as rates per 100,000 residents; update when new vintages are released.
+POPULATIONS = {
+    "dc": 678972,
+    "moco": 1058474,
+    "pgc": 946971,
+    "fairfax": 1147532,
+}
 
 NOW = "CAST(now() AS TIMESTAMP)"
 
@@ -44,6 +65,7 @@ JURISDICTION_LABELS = {
     "dc": "Washington DC",
     "moco": "Montgomery County",
     "pgc": "Prince George's County",
+    "fairfax": "Fairfax County",
 }
 CATEGORY_LABELS = {
     "homicide": "Homicide / Fatal Violence",
@@ -112,6 +134,7 @@ def _summary(con) -> dict:
         "pct_change_7d": pct_change_7d,
         "top_category_7d": top_category_row[0] if top_category_row else None,
         "pct_missing_coords": round(pct_missing_coords, 1),
+        "populations": POPULATIONS,
         "pipeline_status": "ok",
     }
 
@@ -151,6 +174,7 @@ def _trends(con) -> dict:
     """).fetchall()
     return {
         "columns": ["date", "jurisdiction", "offense_category", "count"],
+        "populations": POPULATIONS,
         "rows": [list(r) for r in rows],
     }
 
@@ -178,6 +202,57 @@ def _heatmap(con) -> dict:
     }
 
 
+def _hexes(con) -> dict:
+    """Hotspot layer: incident counts per H3 cell for each window.
+
+    Cells are computed here rather than in SQL so the client needs no H3
+    library; each cell ships with its boundary polygon (lat, lng pairs)
+    ready for Leaflet. Only geocoded incidents participate, and counts
+    are per cell over a whole window, so nothing here is sharper than
+    the block-level points already on the map.
+    """
+    max_window = max(HEX_WINDOWS)
+    rows = con.execute(f"""
+        SELECT latitude, longitude, offense_category,
+               CAST({NOW} AS DATE) - CAST(occurred_at AS DATE) AS age_days
+        FROM marts.fct_incidents
+        WHERE occurred_at >= {NOW} - INTERVAL {max_window} DAY
+          AND occurred_at <= {NOW} + INTERVAL 1 DAY
+          AND latitude IS NOT NULL AND longitude IS NOT NULL
+    """).fetchall()
+
+    counts: dict[int, dict[str, dict]] = {w: {} for w in HEX_WINDOWS}
+    for lat, lng, category, age_days in rows:
+        cell = h3.latlng_to_cell(lat, lng, HEX_RESOLUTION)
+        for window in HEX_WINDOWS:
+            if age_days is not None and age_days <= window:
+                entry = counts[window].setdefault(cell, {"n": 0, "cats": {}})
+                entry["n"] += 1
+                entry["cats"][category] = entry["cats"].get(category, 0) + 1
+
+    windows = {}
+    boundaries = {}
+    for window, cells in counts.items():
+        out = []
+        for cell, entry in cells.items():
+            top_cat = max(entry["cats"], key=entry["cats"].get)
+            out.append([cell, entry["n"], top_cat])
+            if cell not in boundaries:
+                boundaries[cell] = [
+                    [round(lat, 5), round(lng, 5)]
+                    for lat, lng in h3.cell_to_boundary(cell)
+                ]
+        out.sort(key=lambda r: -r[1])
+        windows[str(window)] = out
+
+    return {
+        "resolution": HEX_RESOLUTION,
+        "columns": ["hex", "count", "top_category"],
+        "windows": windows,
+        "boundaries": boundaries,
+    }
+
+
 def _digest(con) -> dict:
     """Daily brief for the latest complete data day: counts, comparisons,
     plain-English bullets, and the day's most severe incidents. Feeds
@@ -190,7 +265,8 @@ def _digest(con) -> dict:
     """).fetchone()[0]
     if latest_day is None:
         return {"latest_day": None, "bullets": ["No data available yet."],
-                "by_jurisdiction": [], "by_category": [], "notable": [], "last14": []}
+                "by_jurisdiction": [], "by_category": [], "notable": [],
+                "last14": [], "signals": []}
     day = f"DATE '{latest_day}'"
 
     total, prev_day_total = con.execute(f"""
@@ -239,6 +315,51 @@ def _digest(con) -> dict:
         GROUP BY 1 ORDER BY 1
     """)
 
+    # Anomaly signals: each jurisdiction x category compared to its own
+    # same-weekday average over the prior 8 weeks (dividing by all 8
+    # candidate dates so zero days count as zeros). A signal fires only
+    # when the baseline is at least SIGNAL_MIN_BASELINE, so thin slices
+    # (e.g. one homicide vs an average near zero) never masquerade as
+    # statistical spikes.
+    SIGNAL_MIN_BASELINE = 3.0
+    SIGNAL_HIGH, SIGNAL_LOW = 1.5, 0.5
+    today_slices = {
+        (r["jurisdiction"], r["offense_category"]): r["count"]
+        for r in _rows_as_dicts(con, f"""
+            SELECT jurisdiction, offense_category, COUNT(*) AS count
+            FROM marts.fct_incidents
+            WHERE CAST(occurred_at AS DATE) = {day}
+            GROUP BY 1, 2
+        """)
+    }
+    baselines = {
+        (r["jurisdiction"], r["offense_category"]): r["total"] / 8.0
+        for r in _rows_as_dicts(con, f"""
+            SELECT jurisdiction, offense_category, COUNT(*) AS total
+            FROM marts.fct_incidents
+            WHERE CAST(occurred_at AS DATE) BETWEEN {day} - 56 AND {day} - 1
+              AND dayofweek(occurred_at) = dayofweek({day})
+            GROUP BY 1, 2
+        """)
+    }
+    signals = []
+    for key, baseline in baselines.items():
+        if baseline < SIGNAL_MIN_BASELINE:
+            continue
+        count = today_slices.get(key, 0)
+        ratio = count / baseline
+        if ratio >= SIGNAL_HIGH or ratio <= SIGNAL_LOW:
+            jur, cat = key
+            signals.append({
+                "jurisdiction": jur,
+                "offense_category": cat,
+                "count": count,
+                "baseline": round(baseline, 1),
+                "ratio": round(ratio, 2),
+                "direction": "spike" if ratio >= SIGNAL_HIGH else "lull",
+            })
+    signals.sort(key=lambda s: -abs(s["ratio"] - 1.0))
+
     bullets = []
     if trailing_avg:
         ratio = total / trailing_avg
@@ -262,6 +383,17 @@ def _digest(con) -> dict:
     homicides = sum(r["count"] for r in by_category if r["offense_category"] == "homicide")
     if homicides:
         bullets.append(f"{homicides} homicide{'s' if homicides != 1 else ''} reported.")
+    for sig in signals[:3]:
+        jur = JURISDICTION_LABELS.get(sig["jurisdiction"], sig["jurisdiction"])
+        cat = CATEGORY_LABELS.get(sig["offense_category"], sig["offense_category"])
+        if sig["direction"] == "spike":
+            bullets.append(
+                f"Signal: {cat} in {jur} ran {sig['ratio']:.1f}x its typical "
+                f"{latest_day:%A} ({sig['count']} vs an average of {sig['baseline']:.0f}).")
+        else:
+            bullets.append(
+                f"Signal: {cat} in {jur} came in well under its typical "
+                f"{latest_day:%A} ({sig['count']} vs an average of {sig['baseline']:.0f}).")
 
     return {
         "generated_at": con.execute("SELECT strftime(now(), '%Y-%m-%dT%H:%M:%SZ')").fetchone()[0],
@@ -273,6 +405,7 @@ def _digest(con) -> dict:
         "by_category": by_category,
         "notable": notable,
         "last14": last14,
+        "signals": signals,
         "bullets": bullets,
     }
 
@@ -285,6 +418,7 @@ def run() -> None:
     _write_json("incidents.json", _incidents(con))
     _write_json("trends.json", _trends(con))
     _write_json("heatmap.json", _heatmap(con))
+    _write_json("hexes.json", _hexes(con))
     _write_json("digest.json", _digest(con))
 
     con.close()
