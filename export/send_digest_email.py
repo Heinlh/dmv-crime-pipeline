@@ -377,6 +377,18 @@ def run() -> int:
         timeout=60,
     )
     if response.status_code >= 300:
+        # Re-running the workflow re-composes the identical email and
+        # Buttondown refuses to send it twice. That refusal is the
+        # desired outcome (subscribers get exactly one digest per day),
+        # so treat it as success instead of failing the pipeline run.
+        try:
+            error_code = response.json().get("code", "")
+        except ValueError:
+            error_code = ""
+        if response.status_code == 400 and error_code == "email_duplicate":
+            logger.info("Digest for %s was already sent (Buttondown reports a "
+                        "duplicate); skipping the re-send", digest["latest_day"])
+            return 0
         logger.error("Buttondown API returned %d: %s", response.status_code, response.text[:500])
         return 1
     logger.info("Digest email queued for %s", digest["latest_day"])
