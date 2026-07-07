@@ -4,6 +4,11 @@ name: Probe a data source
 # the Actions runner (which has open egress, unlike local sandboxes) and
 # prints the response head to the log, so a new source's schema or an
 # ArcGIS service listing can be inspected without guessing. Manual only.
+#
+# Optional filter: a grep -E pattern. When set, the response is split on
+# JSON delimiters and only matching lines print, so the interesting part
+# of a large catalog or HTML page survives the 20 KB output cap.
+# Inputs are passed via env, never interpolated into the script.
 
 on:
   workflow_dispatch:
@@ -12,12 +17,24 @@ on:
         description: "URL to fetch (e.g. an ArcGIS ?f=json listing or a Socrata /api/views/<id>.json)"
         required: true
         type: string
+      filter:
+        description: "Optional grep -E pattern (case-insensitive); prints matching lines only"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fetch and print response head
+      - name: Fetch and print response
+        env:
+          PROBE_URL: ${{ inputs.url }}
+          PROBE_FILTER: ${{ inputs.filter }}
         run: |
-          curl -sSL --max-time 60 "${{ inputs.url }}" | head -c 20000
+          if [ -n "$PROBE_FILTER" ]; then
+            curl -sSL --max-time 60 "$PROBE_URL" | tr ',{' '\n\n' | grep -E -i -- "$PROBE_FILTER" | head -c 20000 || echo "NO MATCHES for $PROBE_FILTER"
+          else
+            curl -sSL --max-time 60 "$PROBE_URL" | head -c 20000
+          fi
