@@ -638,3 +638,212 @@ code {
   nav.topnav { padding: 0 1rem; }
   nav.topnav a.link { padding: 0.85rem 0.55rem; font-size: 0.84rem; }
 }
+
+/* ============================================================== */
+/* Cinematic layer: HUD framing, scanline sweep, glitch, cursor.  */
+/* Pure presentation on top of the calm base theme. Every moving  */
+/* part is gated behind prefers-reduced-motion: no-preference so  */
+/* reduced-motion users get the identical static design.          */
+/* ============================================================== */
+
+/* HUD corner brackets on KPI cards and panels: a thin cyan angle
+   in the top-left and bottom-right, like a targeting reticle. */
+.hud, .panel { position: relative; }
+.hud::before,
+.hud::after,
+.panel::before,
+.panel::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  opacity: 0.65;
+}
+.hud::before,
+.panel::before {
+  top: -1px; left: -1px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+}
+.hud::after,
+.panel::after {
+  bottom: -1px; right: -1px;
+  border-bottom: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+}
+/* panels are large surfaces; keep their brackets quieter than cards */
+.panel::before, .panel::after { opacity: 0.4; }
+
+/* Nav scanline sweep: a faint band of light drifting across the top
+   bar every few seconds. Slow, dim, and behind the text. */
+@media (prefers-reduced-motion: no-preference) {
+  nav.topnav { position: relative; overflow: hidden; }
+  nav.topnav::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 140px;
+    left: -160px;
+    background: linear-gradient(100deg, transparent,
+      rgba(77, 227, 255, 0.05) 40%, rgba(77, 227, 255, 0.09) 50%,
+      rgba(77, 227, 255, 0.05) 60%, transparent);
+    animation: navsweep 7s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes navsweep {
+    0%   { transform: translateX(0); }
+    55%  { transform: translateX(calc(100vw + 320px)); }
+    100% { transform: translateX(calc(100vw + 320px)); }
+  }
+}
+
+/* Brand glitch on hover: two chromatic ghost copies flicker for a
+   moment. Uses data-text ghosting only while hovered. */
+@media (prefers-reduced-motion: no-preference) {
+  nav.topnav .brand:hover .logo-d,
+  nav.topnav .brand:hover .logo-m,
+  nav.topnav .brand:hover .logo-v {
+    animation: glitchshift 0.45s steps(2, end) 2;
+  }
+  nav.topnav .brand:hover .logo-m { animation-delay: 0.08s; }
+  nav.topnav .brand:hover .logo-v { animation-delay: 0.16s; }
+  @keyframes glitchshift {
+    0%   { transform: translate(0, 0); text-shadow: none; }
+    25%  { transform: translate(1px, -1px);
+           text-shadow: -2px 0 rgba(209, 123, 255, 0.7), 2px 0 rgba(77, 227, 255, 0.7); }
+    50%  { transform: translate(-1px, 1px);
+           text-shadow: 2px 0 rgba(255, 180, 84, 0.7), -2px 0 rgba(77, 227, 255, 0.7); }
+    100% { transform: translate(0, 0); text-shadow: none; }
+  }
+  nav.topnav .brand .logo-d,
+  nav.topnav .brand .logo-m,
+  nav.topnav .brand .logo-v { display: inline-block; }
+}
+
+/* Blinking cursor accent after the page kicker, terminal-style. */
+.kicker::after {
+  content: "\2588";
+  margin-left: 0.35rem;
+  color: var(--accent);
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .kicker::after { animation: cursorblink 1.2s steps(1, end) infinite; }
+  @keyframes cursorblink { 50% { opacity: 0; } }
+}
+
+/* ------------------------------------------------ playback scrubber */
+
+.playback {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+  padding: 0.7rem 1rem;
+}
+.pb-btn {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-neon);
+  border-radius: 5px;
+  padding: 0.42rem 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pb-btn:hover { background: var(--surface-2); box-shadow: var(--glow-accent); }
+.pb-btn.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.playback input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  min-width: 120px;
+}
+.playback input[type="range"]:disabled { opacity: 0.35; }
+.pb-date { color: var(--text-2); font-size: 0.82rem; white-space: nowrap; }
+
+/* --------------------------------------------------- anomaly signals */
+
+.signal-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.signal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--surface-2);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+}
+.signal.lull { border-left-color: var(--accent-dim); }
+.signal .dir {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+}
+.signal.lull .dir { color: var(--accent); }
+.signal .what { color: var(--text); font-weight: 600; font-size: 0.92rem; }
+.signal .nums { color: var(--muted); font-size: 0.8rem; }
+.signal-none { color: var(--text-2); margin: 0; }
+
+/* -------------------------------------------------- command palette */
+
+.cmdk { position: fixed; inset: 0; z-index: 3000; }
+.cmdk-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(6, 6, 12, 0.72);
+  backdrop-filter: blur(2px);
+}
+.cmdk-panel {
+  position: relative;
+  margin: 12vh auto 0;
+  width: min(560px, calc(100vw - 2rem));
+  background: var(--surface);
+  border: 1px solid var(--border-neon);
+  border-radius: 8px;
+  box-shadow: 0 0 40px rgba(77, 227, 255, 0.12), 0 18px 50px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.cmdk-input {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 0.9rem 1.1rem;
+  font-size: 1rem;
+  font-family: var(--sans);
+  outline: none;
+}
+.cmdk-list { list-style: none; margin: 0; padding: 0.35rem; max-height: 46vh; overflow-y: auto; }
+.cmdk-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cmdk-item.active { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+.cmdk-item:hover { background: var(--surface-2); }
+.cmdk-label { color: var(--text); font-weight: 600; font-size: 0.92rem; }
+.cmdk-hint { color: var(--muted); font-size: 0.78rem; text-align: right; }
+.cmdk-foot {
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 1.1rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+}
+.cmdk-foot kbd {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  margin-right: 0.15rem;
+}

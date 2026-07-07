@@ -40,6 +40,7 @@ JURISDICTION_LABELS = {
     "dc": "Washington DC",
     "moco": "Montgomery County",
     "pgc": "Prince George's County",
+    "fairfax": "Fairfax County",
 }
 CATEGORY_LABELS = {
     "homicide": "Homicide / Fatal Violence",
@@ -172,6 +173,27 @@ def build_narrative(digest: dict) -> list[str]:
             "Prince George's County publishes on a weekly cadence; its most recent days arrive "
             "late and will take their place in a later brief.")
 
+    signals = digest.get("signals", [])
+    if signals:
+        described = []
+        for s in signals[:3]:
+            s_jur = JURISDICTION_LABELS.get(s["jurisdiction"], s["jurisdiction"])
+            s_cat = CATEGORY_LABELS.get(s["offense_category"], s["offense_category"])
+            if s["direction"] == "spike":
+                described.append(
+                    f"{s_cat} in {s_jur} ran {s['ratio']:.1f} times its usual {weekday} "
+                    f"({s['count']} against an average of {s['baseline']:.0f})")
+            else:
+                described.append(
+                    f"{s_cat} in {s_jur} fell to {s['count']} against an average of "
+                    f"{s['baseline']:.0f}")
+        opener = ("one figure steps out of line: " if len(described) == 1
+                  else f"{len(described)} figures step out of line: ")
+        paras.append(
+            f"Set against eight weeks of {weekday}s, {opener}"
+            f"{'; '.join(described)}. Single days make noise, not verdicts, "
+            f"but these are the deviations worth watching.")
+
     homicide = next((r for r in cats if r["offense_category"] == "homicide"), None)
     if homicide:
         n = homicide["count"]
@@ -258,6 +280,17 @@ def build_html(digest: dict, site_url: str) -> str:
 
     notable_blocks = "".join(_notable_block(inc) for inc in digest.get("notable", []))
 
+    signals = digest.get("signals", [])
+    signal_rows = "".join(f"""<tr><td style="padding:3px 0;">
+<span style="font-family:{MONO};font-size:11px;letter-spacing:1px;color:{AMBER if s['direction'] == 'spike' else CYAN};">{'&#9650; SPIKE' if s['direction'] == 'spike' else '&#9660; LULL'}</span>
+<span style="font-family:{FONT};font-size:13px;color:{INK2};">&nbsp;{CATEGORY_LABELS.get(s['offense_category'], s['offense_category'])} &middot; {JURISDICTION_LABELS.get(s['jurisdiction'], s['jurisdiction'])}: {s['count']} vs a typical {s['baseline']:.0f}</span>
+</td></tr>""" for s in signals[:4])
+    signals_section = f"""<tr><td style="padding:12px 28px 6px 28px;">
+<p style="font-family:{FONT};font-size:15px;font-weight:bold;color:{INK};margin:0 0 2px 0;">Signals</p>
+<p style="font-family:{FONT};font-size:12px;color:{MUTED};margin:0 0 8px 0;">Each slice measured against its own same-weekday average over the prior 8 weeks.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{signal_rows}</table>
+</td></tr>""" if signals else ""
+
     def stat(value, label):
         return f"""<td align="center" style="padding:12px 6px;background:{SURFACE2};border-radius:6px;">
 <div style="font-family:{FONT};font-size:24px;font-weight:bold;color:{INK};">{value}</div>
@@ -287,6 +320,7 @@ def build_html(digest: dict, site_url: str) -> str:
 <p style="font-family:{FONT};font-size:15px;font-weight:bold;color:{INK};margin:0 0 6px 0;">The day by category</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{category_rows}</table>
 </td></tr>
+{signals_section}
 <tr><td style="padding:16px 28px 4px 28px;">
 <p style="font-family:{FONT};font-size:15px;font-weight:bold;color:{INK};margin:0 0 2px 0;">The incidents that lead the list</p>
 <p style="font-family:{FONT};font-size:12px;color:{MUTED};margin:0 0 12px 0;">Ranked by this project's severity weighting. Every detail below comes from the agency's published record.</p>

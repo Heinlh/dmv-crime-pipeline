@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DMV Crime Watch - Live Map</title>
+<meta name="description" content="Interactive map of reported crime across Washington DC, Montgomery County, and Prince George's County, updated daily from official agency data.">
+<meta name="theme-color" content="#0a0a14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta property="og:site_name" content="DMV Crime Watch">
+<meta property="og:type" content="website">
+<meta property="og:title" content="DMV Crime Watch: live incident map">
+<meta property="og:description" content="Interactive map of reported crime across Washington DC, Montgomery County, and Prince George's County, updated daily from official agency data.">
+<meta property="og:url" content="https://heinlh.github.io/dmv-crime-pipeline/index.html">
+<meta property="og:image" content="https://heinlh.github.io/dmv-crime-pipeline/og/daily.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'%3E%3Ctext x='2' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%234de3ff'%3ED%3C/text%3E%3Ctext x='12' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23d17bff'%3EM%3C/text%3E%3Ctext x='23' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23ffb454'%3EV%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -62,10 +75,27 @@
         <option value="7">7+</option>
       </select>
     </label>
+    <label title="Shaded cells mark where incidents concentrate">Hotspots
+      <select id="f-hotspots">
+        <option value="">Off</option>
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+      </select>
+    </label>
     <span class="result-count" id="result-count"></span>
   </div>
 
   <div id="map"></div>
+
+  <div class="playback panel" id="playback" aria-label="Day-by-day playback">
+    <button id="pb-toggle" class="pb-btn" type="button" aria-pressed="false"
+            title="Step through the last 30 days one day at a time">&#9654; PLAYBACK</button>
+    <input id="pb-slider" type="range" min="0" max="29" value="29" step="1" disabled
+           aria-label="Day selector, last 30 days">
+    <span id="pb-date" class="pb-date mono">all days in range</span>
+    <button id="pb-play" class="pb-btn" type="button" hidden aria-pressed="false"
+            title="Advance one day per second">&#9654;</button>
+  </div>
 
   <div class="legend panel" id="legend" style="margin-top: 1.4rem;">
     <h2>What am I looking at?</h2>
@@ -74,13 +104,14 @@
       <li>Hover a dot to see the offense; click it for the full summary card.</li>
       <li>Numbers in circles show how many incidents are grouped together at the current zoom level. Zoom in to split them apart.</li>
       <li>Only incidents with a published location are shown; locations are block-level as published, never sharpened.</li>
+      <li>Hotspot shading marks hex cells (about 0.7 km&sup2;) where incidents concentrated over the selected window; brighter means more incidents. It shows where reports cluster, it does not predict anything.</li>
       <li>"Min. severity" uses this project's own 1-10 weighting (10 = homicide), not an official police scale.</li>
     </ul>
   </div>
 
   <footer class="data-note">
-    Data as of last published agency data, not live. Sources: dataMontgomery
-    Crime dataset (icn6-v9z3), DC MPD Crime Incidents feature layers.
+    Data as of last published agency data, not live. Sources: dataMontgomery,
+    DC MPD Crime Incidents, OpenPGC, and FCPD's public crime services.
     Looking for older data? <a href="trends.html">Trends</a> covers the full
     history since 2016. See <a href="about.html">About</a> for how this works.
    &middot; <a href="privacy.html">Privacy policy</a>
