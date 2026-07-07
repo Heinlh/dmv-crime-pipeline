@@ -91,16 +91,18 @@ loads.
   category, explicitly framed as "where reports cluster", never
   predictive), and a day-by-day playback scrubber over the last 30 days
   anchored to the newest incident.
-- Map search (`mapSearch` in home.js): a Google-Maps-style floating
-  search box over the top-left of the map (zoom control moved to
-  top-right). Suggestions (crime types + places: wards/districts/cities/
-  jurisdictions) are built ENTIRELY from the loaded incidents, so no
-  query ever reaches a third-party geocoder. Selecting one sets a
-  free-text term (`mapSearchTerm`, matched against the same haystack as
-  Events), reruns the filters, and fits the map to the matches; the term
-  rides in the Map hash as `q` so searches are shareable. Leaflet event
-  propagation is disabled on the overlay so interacting with it never
-  pans the map.
+- Map search (`mapSearch` in home.js): a floating CASE NUMBER lookup
+  over the top-left of the map (zoom control moved to top-right).
+  Typing 3+ characters suggests matching cases from the loaded
+  incidents (no third-party geocoder; nothing typed leaves the
+  browser); selecting one shows exactly that incident, ignoring the
+  dropdown filters (a case number identifies one incident, so range or
+  category filters must not hide it), fits the map, and opens the
+  summary card via markercluster's zoomToShowLayer. The term rides in
+  the Map hash as `q`. Free-text place/offense search deliberately
+  lives ONLY on the Events page; on the map it fought the filters and
+  was removed. Leaflet event propagation is disabled on the overlay so
+  interacting with it never pans the map.
 - Shareable URL state: filter state lives in the location hash on Map
   (j/days/cat/sev/hex/day), Trends (preset/from/to/gran/j/cat/rate), and
   Events (q/j/cat/days/sort) via `readHashState`/`writeHashState` in
