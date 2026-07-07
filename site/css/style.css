@@ -316,6 +316,7 @@ nav.topnav a.link.active {
 
 /* --------------------------------------------------------------- map */
 
+.map-wrap { position: relative; }
 #map {
   height: 64vh;
   min-height: 420px;
@@ -324,6 +325,99 @@ nav.topnav a.link.active {
   box-shadow: var(--glow-cyan);
   background: var(--bg);
 }
+
+/* ------------------------------------------------- map search overlay */
+/* A Google-Maps-style floating search that sits over the top-left of the
+   map (the zoom control is moved to the top-right in home.js so they
+   never collide). Self-contained: suggestions are built from the loaded
+   incidents, so nothing is sent to a third-party geocoder. */
+.map-search {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1100;   /* above Leaflet controls (~1000) */
+  width: min(360px, calc(100% - 24px));
+  font-family: var(--sans);
+}
+.map-search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(16, 16, 29, 0.94);
+  border: 1px solid var(--border-neon);
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+.map-search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--glow-accent);
+}
+.map-search-icon { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.map-search-box input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.map-search-box input::placeholder { color: var(--muted); }
+/* hide the native search clear so ours is the only one */
+.map-search-box input::-webkit-search-cancel-button { display: none; }
+.map-search-clear {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.map-search-clear:hover { color: var(--text); }
+
+.map-search-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0.3rem;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-neon);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+.map-search-group {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.45rem 0.6rem 0.25rem;
+}
+.map-search-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.map-search-item.active,
+.map-search-item:hover { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+.map-search-item .dot {
+  flex: none;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  transform: translateY(1px);
+  background: var(--muted);
+}
+.map-search-item .msi-label { color: var(--text); font-size: 0.9rem; }
+.map-search-item .msi-meta { color: var(--muted); font-size: 0.76rem; margin-left: auto; white-space: nowrap; }
+.map-search-empty { padding: 0.6rem; color: var(--text-2); font-size: 0.85rem; }
 
 /* Leaflet chrome, restyled for the dark surface */
 .leaflet-container { font-family: var(--sans); }

@@ -85,6 +85,16 @@ loads.
   category, explicitly framed as "where reports cluster", never
   predictive), and a day-by-day playback scrubber over the last 30 days
   anchored to the newest incident.
+- Map search (`mapSearch` in home.js): a Google-Maps-style floating
+  search box over the top-left of the map (zoom control moved to
+  top-right). Suggestions (crime types + places: wards/districts/cities/
+  jurisdictions) are built ENTIRELY from the loaded incidents, so no
+  query ever reaches a third-party geocoder. Selecting one sets a
+  free-text term (`mapSearchTerm`, matched against the same haystack as
+  Events), reruns the filters, and fits the map to the matches; the term
+  rides in the Map hash as `q` so searches are shareable. Leaflet event
+  propagation is disabled on the overlay so interacting with it never
+  pans the map.
 - Shareable URL state: filter state lives in the location hash on Map
   (j/days/cat/sev/hex/day), Trends (preset/from/to/gran/j/cat/rate), and
   Events (q/j/cat/days/sort) via `readHashState`/`writeHashState` in
@@ -143,6 +153,17 @@ loads.
   compose narrative details the agency did not publish.
 - Nothing on the site is predictive: hotspots and signals describe
   published reports, and the copy says so explicitly.
+- Security posture: all API-derived strings are escaped via `esc()`
+  before innerHTML; all SQL timestamp bounds are laundered through Python
+  `datetime` objects before string interpolation (never raw API strings);
+  extractors select fields at the API level but never eval/shell/pickle;
+  secrets come from env only. Every page ships a Content-Security-Policy
+  meta tag (default-src 'self'; scripts/styles limited to self + the
+  pinned CDNs; img to self/data/carto; connect 'self'; form-action to
+  Buttondown). The map search is deliberately geocoder-free so no query
+  leaves the browser. Clickjacking protection (frame-ancestors) needs an
+  HTTP header GitHub Pages cannot set; CDN scripts could additionally use
+  Subresource Integrity if the project ever pins exact hashes.
 - Arlington County has no machine-readable feed since mid-2022 (excluded
   until the county resumes).
 
