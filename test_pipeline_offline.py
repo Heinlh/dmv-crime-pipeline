@@ -127,10 +127,26 @@ fairfax_records = [
      "Station": "3", "PatrolArea": "302", "latitude": "38.8500", "longitude": "-77.3000"},
 ]
 
+# Prince William: single-table ArcGIS layer, NIBRS text in IBRCode,
+# geometry flattened to lat/lng by the extractor (requested in 4326).
+pwc_records = [
+    {"InstanceID": "9f0e8b1a-0000-0000-0000-000000000001", "CaseNo": "PD260001111 ",
+     "OccurredOn": ms(RECENT_B - timedelta(hours=3)),
+     "BlockAddress": "13800 Smoketown Rd", "City": "WOODBRIDGE", "State": "VA",
+     "ZipCode": "22192", "IBRCode": "MOTOR VEHICLE THEFT",
+     "CrimeCategory": "Motor Vehicle Theft", "latitude": "38.6410", "longitude": "-77.2963"},
+    {"InstanceID": "9f0e8b1a-0000-0000-0000-000000000002", "CaseNo": "PD260001112",
+     "OccurredOn": ms(RECENT_B - timedelta(hours=6)),
+     "BlockAddress": "7900 Sudley Rd", "City": "MANASSAS", "State": "VA",
+     "IBRCode": "AGGRAVATED ASSAULT", "CrimeCategory": "Assault",
+     "latitude": "38.7509", "longitude": "-77.4753"},
+]
+
 land_raw(moco_records, "moco")
 land_raw(dc_records, "dc")
 land_raw(pgc_records, "pgc")
 land_raw(fairfax_records, "fairfax")
+land_raw(pwc_records, "pwc")
 load_duckdb.run()
 load_duckdb.run()  # second run proves idempotency (no duplicate keys)
 export_site_data.run()
@@ -146,7 +162,7 @@ print("\n--- daily_counts ---")
 print(con.execute("SELECT * FROM marts.daily_counts ORDER BY occurred_date").df().to_string(index=False))
 
 n = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
-assert n == 12, f"expected 12 unique incidents, got {n}"
+assert n == 14, f"expected 14 unique incidents, got {n}"
 dup = con.execute("SELECT occurred_at FROM marts.fct_incidents WHERE incident_key='moco-201234567'").fetchone()[0]
 assert str(dup).startswith(RECENT_A_FIX.strftime("%Y-%m-%d %H:%M")), "dedupe should keep the latest version"
 geo = con.execute("SELECT latitude FROM marts.fct_incidents WHERE incident_key='dc-26098766'").fetchone()[0]
@@ -168,6 +184,8 @@ expected_categories = {
     "fairfax-20260010001": "violent",  # two victim rows deduped to one incident
     "fairfax-20260010002": "vehicle",  # MOTOR VEHICLE THEFT
     "fairfax-20260010003": "disorder", # society-schema DRUG/NARCOTIC row
+    "pwc-PD260001111": "vehicle",      # trimmed CaseNo, MOTOR VEHICLE THEFT
+    "pwc-PD260001112": "violent",      # AGGRAVATED ASSAULT
 }
 for key, expected in expected_categories.items():
     assert categories[key] == expected, f"{key}: expected {expected}, got {categories[key]}"
@@ -178,7 +196,7 @@ incidents = json.loads((SITE_DATA_DIR / "incidents.json").read_text())
 trends = json.loads((SITE_DATA_DIR / "trends.json").read_text())
 heatmap = json.loads((SITE_DATA_DIR / "heatmap.json").read_text())
 
-assert summary["total_records"] == 12
+assert summary["total_records"] == 14
 assert summary["data_start_date"] == "2016-08-15", summary["data_start_date"]
 
 # fairfax dedupe details: severity of the surviving row is the aggravated one
@@ -194,7 +212,7 @@ assert heatmap["columns"] == ["weekday", "hour", "jurisdiction", "offense_catego
 digest = json.loads((SITE_DATA_DIR / "digest.json").read_text())
 assert digest["latest_day"], "digest must identify the latest data day"
 assert digest["bullets"] and any("incidents were reported" in b for b in digest["bullets"]), digest["bullets"]
-assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc", "fairfax"}
+assert {r["jurisdiction"] for r in digest["by_jurisdiction"]} <= {"dc", "moco", "pgc", "fairfax", "pwc"}
 assert digest["notable"], "digest should list notable incidents"
 assert "signals" in digest, "digest must carry the anomaly signals list"
 for sig in digest["signals"]:
@@ -219,7 +237,7 @@ for cell, count, _ in hexes["windows"]["7"]:
 
 # --- populations for per-capita rates ---
 assert summary["populations"]["dc"] > 600000
-assert set(summary["populations"]) == {"dc", "moco", "pgc", "fairfax"}
+assert set(summary["populations"]) == {"dc", "moco", "pgc", "fairfax", "pwc"}
 
 # --- OG share card renders from the digest ---
 from export import render_og_card  # noqa: E402

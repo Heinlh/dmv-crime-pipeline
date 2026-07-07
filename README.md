@@ -1,8 +1,9 @@
 # DMV Crime Pipeline
 
 End to end ETL pipeline that ingests public crime data for the DMV area
-(Washington DC, Montgomery County MD, Prince George's County MD, and
-Fairfax County VA), lands it in a raw parquet zone, and builds a
+(Washington DC, Montgomery County MD, Prince George's County MD,
+Fairfax County VA, and Prince William County VA), lands it in a raw
+parquet zone, and builds a
 unified, analysis-ready DuckDB warehouse with a shared crime taxonomy
 across jurisdictions.
 
@@ -18,7 +19,7 @@ Layers in the warehouse (data/warehouse/crime.duckdb):
 
 | Layer | Object | Purpose |
 |---|---|---|
-| raw | raw.moco_incidents, raw.dc_incidents, raw.pgc_incidents, raw.fairfax_incidents | Source data as published, all VARCHAR, rebuilt from parquet |
+| raw | raw.moco_incidents, raw.dc_incidents, raw.pgc_incidents, raw.fairfax_incidents, raw.pwc_incidents | Source data as published, all VARCHAR, rebuilt from parquet |
 | marts | marts.dim_offense_map | Explicit DC offense to unified category mapping with severity weights |
 | marts | marts.fct_incidents | One row per incident, unified schema and taxonomy, idempotent upserts |
 | marts | marts.daily_counts | Rollup view feeding dashboards and the daily digest |
@@ -197,6 +198,7 @@ is idempotent.
   in [docs/dbt-migration.md](docs/dbt-migration.md)
 - Priority-case scoring (severity x recency x cluster bonus)
 - Local news RSS matching
-- Arlington County is excluded until the county resumes publishing
-  machine-readable incident data (their open dataset stopped in
-  mid-2022)
+- Arlington County (its 2024 Crime Data Hub publishes weekly bulk data;
+  endpoint recon in progress). Loudoun, Alexandria, Frederick, Charles,
+  Howard, and Anne Arundel publish no incident-level feeds and are
+  documented as excluded on the About page

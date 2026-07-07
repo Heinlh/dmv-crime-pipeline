@@ -62,6 +62,7 @@ JURISDICTION_LABELS = {
     "moco": "Montgomery Co",
     "pgc": "Prince George's Co",
     "fairfax": "Fairfax Co",
+    "pwc": "Prince William Co",
 }
 FONT = "'DejaVu Sans', 'Helvetica Neue', Arial, sans-serif"
 

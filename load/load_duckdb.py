@@ -21,6 +21,7 @@ SOURCES = {
     "dc": "raw.dc_incidents",
     "pgc": "raw.pgc_incidents",
     "fairfax": "raw.fairfax_incidents",
+    "pwc": "raw.pwc_incidents",
 }
 
 # Columns sql/transform.sql references per raw table. Socrata (and to a
@@ -56,6 +57,11 @@ EXPECTED_COLUMNS = {
         "IBRDescription", "IncidentNumber", "ViolationCodeReference_Descript",
         "EventDescription", "Category", "Station", "PatrolArea", "DISTRICT",
         "latitude", "longitude",
+    ],
+    "raw.pwc_incidents": [
+        "InstanceID", "CaseNo", "OccurredOn", "OccurredBetween",
+        "BlockAddress", "City", "State", "ZipCode", "IBRCode",
+        "CrimeCategory", "latitude", "longitude",
     ],
 }
 
@@ -104,6 +110,8 @@ def run() -> None:
             if "raw.pgc_incidents" in statement and "pgc_incidents" not in existing:
                 continue
             if "raw.fairfax_incidents" in statement and "fairfax_incidents" not in existing:
+                continue
+            if "raw.pwc_incidents" in statement and "pwc_incidents" not in existing:
                 continue
             con.execute(statement)
         total = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]

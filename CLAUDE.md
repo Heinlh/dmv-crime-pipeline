@@ -3,8 +3,10 @@
 ETL pipeline ingesting public crime data for the DMV area into a unified
 DuckDB warehouse. Currently covers Montgomery County MD (Socrata),
 Washington DC (ArcGIS), Prince George's County MD (Socrata, updated
-weekly by the county), and Fairfax County VA (FCPD "Crimes Against"
-ArcGIS services, updated hourly by the county). Built as a portfolio
+weekly by the county), Fairfax County VA (FCPD "Crimes Against"
+ArcGIS services, updated hourly by the county), and Prince William
+County VA (PWC Police Public_Crime_Reports ArcGIS layer, updated daily,
+rolling 3-year window). Built as a portfolio
 project demonstrating analytics engineering: incremental extraction,
 raw/marts layering, cross-jurisdiction taxonomy mapping, and idempotent
 loads.
@@ -13,7 +15,7 @@ loads.
 
 - `python run_pipeline.py` runs extract (all sources), load, transform, site export, and OG card render
 - `python test_pipeline_offline.py` full offline smoke test, no network needed
-- `python -m extractors.moco` / `.dc` / `.pgc` / `.fairfax` run one extractor
+- `python -m extractors.moco` / `.dc` / `.pgc` / `.fairfax` / `.pwc` run one extractor
 - `python -m export.export_site_data` regenerate `site/data/` without re-extracting
 - `python -m export.render_og_card` re-render `site/og/daily.png` from digest.json
 - `python -m export.send_digest_email` send the daily digest via Buttondown
@@ -33,7 +35,11 @@ loads.
   victim demographics and officer identifiers, which are deliberately
   never pulled. Fairfax rows are victim/offense level; the transform
   dedupes to one incident per IncidentNumber keeping the most severe
-  offense row.
+  offense row. The PWC extractor watermarks on OccurredOn with a 7-day
+  overlap (the layer has no report-date column and reports are filed
+  late); its layer stores state-plane geometry so queries request
+  outSR=4326. PWC withholds sexual offenses at the source (victim
+  privacy), so that category is structurally undercounted there.
 - `load/load_duckdb.py` rebuilds raw tables from parquet (padding any
   columns a sparse batch omitted), runs `sql/transform.sql`
 - `sql/schema.sql` DDL for raw schema, `marts.dim_offense_map`,
@@ -164,8 +170,13 @@ loads.
   leaves the browser. Clickjacking protection (frame-ancestors) needs an
   HTTP header GitHub Pages cannot set; CDN scripts could additionally use
   Subresource Integrity if the project ever pins exact hashes.
-- Arlington County has no machine-readable feed since mid-2022 (excluded
-  until the county resumes).
+- DMV coverage audit (July 2026): Arlington County resumed publishing in
+  2024 via its Crime Data Hub (weekly, data since 2021, backend at
+  datahub-v2.arlingtonva.us; dataset endpoint discovery still pending,
+  integration is a fast-follow). Loudoun County and the City of
+  Alexandria publish dashboards/CityProtect only, no feed. Frederick,
+  Charles, Howard, and Anne Arundel MD publish only annual summaries or
+  PDFs. The About page documents all of this for visitors.
 
 ## Roadmap (in order)
 

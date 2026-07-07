@@ -8,7 +8,7 @@ import logging
 import sys
 
 from export import export_site_data, render_og_card
-from extractors import dc, fairfax, moco, pgc
+from extractors import dc, fairfax, moco, pgc, pwc
 from load import load_duckdb
 
 logger = logging.getLogger("pipeline")
@@ -16,7 +16,7 @@ logger = logging.getLogger("pipeline")
 
 def main() -> int:
     failures = []
-    for name, module in (("moco", moco), ("dc", dc), ("pgc", pgc), ("fairfax", fairfax)):
+    for name, module in (("moco", moco), ("dc", dc), ("pgc", pgc), ("fairfax", fairfax), ("pwc", pwc)):
         try:
             module.run()
         except Exception:
