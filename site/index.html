@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.basemaps.cartocdn.com; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self' https://buttondown.com">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DMV Crime Watch - Live Map</title>
 <meta name="description" content="Interactive map of reported crime across Washington DC, Montgomery County, and Prince George's County, updated daily from official agency data.">
@@ -85,7 +86,25 @@
     <span class="result-count" id="result-count"></span>
   </div>
 
-  <div id="map"></div>
+  <div class="map-wrap">
+    <div class="map-search" id="map-search">
+      <div class="map-search-box">
+        <svg class="map-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                d="M10.5 3a7.5 7.5 0 1 0 4.55 13.46l4.24 4.24M10.5 3a7.5 7.5 0 0 1 5.3 12.8"/>
+        </svg>
+        <input id="map-search-input" type="search" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="false" aria-controls="map-search-list"
+               aria-autocomplete="list" aria-label="Search crimes or places on the map"
+               placeholder="Search a crime type or place...">
+        <button id="map-search-clear" class="map-search-clear" type="button" hidden
+                aria-label="Clear search">&times;</button>
+      </div>
+      <ul class="map-search-list" id="map-search-list" role="listbox" hidden
+          aria-label="Search suggestions"></ul>
+    </div>
+    <div id="map"></div>
+  </div>
 
   <div class="playback panel" id="playback" aria-label="Day-by-day playback">
     <button id="pb-toggle" class="pb-btn" type="button" aria-pressed="false"
@@ -101,6 +120,7 @@
     <h2>What am I looking at?</h2>
     <div class="legend-swatches" id="legend-swatches"></div>
     <ul class="legend-notes">
+      <li>Use the search box on the map to jump to a crime type or a place (a ward, district, or city); suggestions come from the loaded incidents, so nothing you type leaves your browser.</li>
       <li>Hover a dot to see the offense; click it for the full summary card.</li>
       <li>Numbers in circles show how many incidents are grouped together at the current zoom level. Zoom in to split them apart.</li>
       <li>Only incidents with a published location are shown; locations are block-level as published, never sharpened.</li>

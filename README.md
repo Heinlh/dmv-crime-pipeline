@@ -48,7 +48,7 @@ palette is validated for colorblind safety against the dark surface:
 
 | Page | Shows |
 |---|---|
-| site/index.html | Map: freshness banner, plain-English weekly summary and KPI tiles, then the clustered incident map (hover a dot for the offense, click for the full summary card) with a live-count legend, filterable by jurisdiction, date range, category, severity; H3 hotspot shading (off / 7d / 30d) and a day-by-day playback scrubber over the last 30 days |
+| site/index.html | Map: freshness banner, plain-English weekly summary and KPI tiles, then the clustered incident map (hover a dot for the offense, click for the full summary card) with a live-count legend, filterable by jurisdiction, date range, category, severity; a Google-Maps-style search box (autocomplete over crime types and places, built from the loaded data so no geocoder is called); H3 hotspot shading (off / 7d / 30d) and a day-by-day playback scrubber over the last 30 days |
 | site/trends.html | Full-history trends with period presets (90D / 1Y / YTD / ALL) plus a custom month range (e.g. 2017-2020) and day/week/month granularity; COUNTS / PER 100K toggle (Census Vintage 2023 populations); volume line, category breakdown with prior-period deltas, day/daypart heatmap, table view per chart |
 | site/events.html | Searchable incident log over the last 90 days: free-text search (offense, street, case number, district) plus jurisdiction/category/date/sort filters, rendered as summary cards with factual plain-English titles (agency label always shown) |
 | site/daily.html | Daily Brief: plain-English bullets for the latest data day, anomaly signals (each jurisdiction x category vs its own 8-week same-weekday baseline), category and 14-day charts, and the day's most serious incidents; powered by digest.json |
@@ -66,6 +66,33 @@ the site; signup tracking lives in Buttondown's dashboard.
 `CATEGORY_DESCRIPTIONS`), colors, and formatters used across pages, so raw
 taxonomy values (`offense_category`, NIBRS codes, etc.) never reach the UI
 directly.
+
+## Security and privacy posture
+
+The site renders public agency data with no accounts, cookies, or
+first-party analytics, so the attack surface is small; the code still
+holds the line defensively:
+
+- Every API-derived string is HTML-escaped before it reaches `innerHTML`,
+  and raw taxonomy codes never render unlabeled.
+- All SQL timestamp bounds are laundered through Python `datetime` objects
+  before interpolation, so a malformed value from an upstream API cannot
+  become SQL. Extractors never use `eval`, a shell, or `pickle`, and TLS
+  verification is never disabled.
+- Secrets (`SOCRATA_APP_TOKEN`, `BUTTONDOWN_API_KEY`) come from the
+  environment only and never touch the repo or the site.
+- Every page sends a `Content-Security-Policy` meta tag: `default-src
+  'self'`, scripts and styles limited to self plus the pinned CDNs, images
+  to self/`data:`/the map-tile host, `connect-src 'self'`, and
+  `form-action` limited to the Buttondown signup endpoint.
+- The map search is deliberately geocoder-free: suggestions are built from
+  the already-loaded incidents, so nothing a visitor types is sent
+  anywhere.
+
+Two items need infrastructure a static GitHub Pages host cannot provide:
+clickjacking protection (`frame-ancestors`, an HTTP header) and
+Subresource Integrity on the CDN scripts (self-hosting the libraries is
+the alternative). Both are documented rather than silently skipped.
 
 Every page shares a Ctrl+K / Cmd+K command palette and shareable URLs:
 map, trends, and events filters live in the location hash, so any view
