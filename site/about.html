@@ -160,6 +160,98 @@
     </ul>
   </div>
 
+  <div class="panel" id="severity">
+    <h2>How the severity weighting is calculated</h2>
+    <p>
+      Every incident gets an integer weight from <strong>1 to 10</strong>,
+      assigned from the agency's own offense label when the warehouse is
+      built. It is this project's editorial ranking device, used to sort
+      and filter across five jurisdictions that each label offenses
+      differently; it is not an official police scale and not a
+      measurement of harm.
+    </p>
+
+    <h3>Step 1: the scale</h3>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th class="num">Weight</th><th>Tier</th><th>Example agency labels that land there</th></tr></thead>
+        <tbody>
+          <tr><td class="num">10</td><td>Homicide</td><td>HOMICIDE, MURDER, MANSLAUGHTER</td></tr>
+          <tr><td class="num">9</td><td>Sexual offenses</td><td>SEX ABUSE, RAPE, FONDLING</td></tr>
+          <tr><td class="num">8</td><td>Aggravated assault</td><td>ASSAULT W/DANGEROUS WEAPON, ASSAULT - AGGRAVATED</td></tr>
+          <tr><td class="num">7</td><td>Robbery, carjacking</td><td>ROBBERY, CARJACKING</td></tr>
+          <tr><td class="num">6</td><td>Arson</td><td>ARSON</td></tr>
+          <tr><td class="num">5</td><td>Other assault, kidnapping, burglary</td><td>SIMPLE ASSAULT, KIDNAPPING, B &amp; E RESIDENTIAL, BURGLARY</td></tr>
+          <tr><td class="num">4</td><td>Vehicle theft, weapons offenses</td><td>MOTOR VEHICLE THEFT, AUTO STOLEN, WEAPON VIOLATION</td></tr>
+          <tr><td class="num">3</td><td>Theft, fraud, vandalism</td><td>THEFT, LARCENY, THEFT F/AUTO, FRAUD, VANDALISM</td></tr>
+          <tr><td class="num">2</td><td>Drug, alcohol, public order</td><td>DRUG OFFENSE, DUI, LIQUOR VIOLATION, DISORDERLY CONDUCT</td></tr>
+          <tr><td class="num">1</td><td>Everything else</td><td>ALL OTHER OFFENSES, administrative or unclear labels</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Step 2: assigning a weight to one offense label</h3>
+    <p>
+      The label is matched against keyword rules checked <strong>from 10
+      downward</strong>, and the first tier that matches wins, so a label
+      that fits two tiers gets the more severe one. For DC, whose offense
+      list is a closed set of nine values, each value is mapped directly
+      to a weight instead of by keyword.
+    </p>
+    <p class="mono">
+      "ASSAULT W/DANGEROUS WEAPON"<br>
+      &nbsp;&nbsp;matches tier 8 (aggravated) before tier 5 (assault)
+      &nbsp;&rarr;&nbsp; w = 8, not 5
+    </p>
+
+    <h3>Step 3: one weight per incident</h3>
+    <p>
+      Fairfax and Prince William publish one row per offense or victim,
+      so a single incident can arrive as several rows. The incident's
+      weight is the <strong>maximum</strong> over its rows, and it is
+      counted once, in the category of that most severe row:
+    </p>
+    <p class="mono">
+      case #20260010001 arrives as 3 rows:<br>
+      &nbsp;&nbsp;AGGRAVATED ASSAULT (w = 8), SIMPLE ASSAULT (w = 5), SIMPLE ASSAULT (w = 5)<br>
+      &nbsp;&nbsp;severity(incident) = max(8, 5, 5) = <strong>8</strong>
+      &nbsp;&rarr;&nbsp; one violent incident, not three
+    </p>
+
+    <h3>Step 4: where the number is used</h3>
+    <p><strong>The map's "Min. severity" filter</strong> keeps an incident
+      only if its weight clears the threshold:</p>
+    <p class="mono">
+      day's incidents: w = {10, 7, 5, 3, 3, 2}<br>
+      &nbsp;&nbsp;filter "7+" keeps {10, 7} &rarr; 2 of 6 shown<br>
+      &nbsp;&nbsp;filter "4+" keeps {10, 7, 5} &rarr; 3 of 6 shown
+    </p>
+    <p><strong>The Daily Brief's "most serious incidents"</strong> sorts by
+      weight first, then by how recent the incident is:</p>
+    <p class="mono">
+      incidents (w, time): (3, 09:00), (10, 02:15), (7, 21:40), (3, 18:05)<br>
+      &nbsp;&nbsp;sort by (w desc, time desc) &rarr; 10, 7, 3 (18:05), 3 (09:00)
+    </p>
+    <p><strong>The warehouse also keeps a daily severity sum</strong> per
+      area (the sum of weights that day), a single number that mixes how
+      many incidents happened with how serious they were:</p>
+    <p class="mono">
+      two thefts and a robbery: 3 + 3 + 7 = 13<br>
+      one homicide alone: 10
+    </p>
+    <p>
+      That last example is exactly why the scale's limits matter: 13 is
+      bigger than 10, but nobody would call two thefts and a robbery
+      "worse" than a homicide. The weights are <strong>ordinal</strong>
+      (they rank offenses) not <strong>cardinal</strong> (the gap from 9
+      to 10 is not a measured unit of harm, and a 10 is not "twice" a 5).
+      Sums and averages of the weights are treated as rough indicators
+      only, the site never presents them as harm measurements, and the
+      agency's original label stays on every incident so you can always
+      disagree with the tiering.
+    </p>
+  </div>
+
   <footer class="data-note">
     Built as an open analytics engineering project: incremental extraction,
     a raw parquet landing zone, a DuckDB warehouse with a unified
