@@ -150,6 +150,9 @@ loads.
   average) never masquerade as spikes; always presented with the
   baseline number and "one day is noise" framing.
 - No em dashes in any prose, docs, or comments.
+- NEVER include claude.ai session links in pull request titles or
+  bodies (owner preference; existing PRs were scrubbed July 2026). The
+  plain "Generated with Claude Code" attribution line is fine.
 - Requires SOCRATA_APP_TOKEN env var for reasonable MoCo/PGC rate limits.
 - NO PII in this repo or the static site, ever: email signups post
   directly to Buttondown (set BUTTONDOWN_USERNAME in site/js/common.js;
