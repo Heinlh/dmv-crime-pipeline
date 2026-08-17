@@ -34,6 +34,7 @@
     <a class="link active" href="daily.html">Daily Brief</a>
     <a class="link" href="alerts.html">Alerts</a>
     <a class="link" href="about.html">About</a>
+    <a class="link" href="methodology.html">Methodology</a>
     <a class="link" href="contact.html">Contact</a>
   </div>
 </nav>
@@ -49,9 +50,11 @@
 
   <div class="panel">
     <h2>Signals</h2>
-    <p class="heatmap-subtitle">Each jurisdiction and category is measured against its own
-      same-weekday average over the prior 8 weeks. One day is noise, not a verdict;
-      signals only fire when the typical volume is at least 3.</p>
+    <p class="heatmap-subtitle">Each neighborhood and category is compared against its own
+      same-weekday baseline. Because that is hundreds of tests a day, the results are
+      corrected for multiple comparisons so a handful of alarming-looking alerts cannot
+      appear by chance alone. One day is noise, not a verdict.
+      <a href="methodology.html#signals">How this is calculated</a>.</p>
     <div id="signals" class="signal-list"></div>
   </div>
 

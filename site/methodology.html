@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.basemaps.cartocdn.com; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self' https://buttondown.com">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Methodology - DMV Crime Watch</title>
+<meta name="description" content="How this project corrects three systematic biases in published crime data: aoristic timing, reporting delay, and multiple-comparison false alarms.">
+<meta name="theme-color" content="#0a0a14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta property="og:site_name" content="DMV Crime Watch">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Methodology: correcting three biases in crime data">
+<meta property="og:description" content="How this project corrects three systematic biases in published crime data: aoristic timing, reporting delay, and multiple-comparison false alarms.">
+<meta property="og:url" content="https://heinlh.github.io/dmv-crime-pipeline/methodology.html">
+<meta property="og:image" content="https://heinlh.github.io/dmv-crime-pipeline/og/daily.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'%3E%3Ctext x='2' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%234de3ff'%3ED%3C/text%3E%3Ctext x='12' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23d17bff'%3EM%3C/text%3E%3Ctext x='23' y='13' font-family='Arial,sans-serif' font-size='12' font-weight='bold' fill='%23ffb454'%3EV%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="pulse" aria-hidden="true"></span><span class="logo-d">D</span><span class="logo-m">M</span><span class="logo-v">V</span><span class="tag">//</span>CRIME WATCH</a>
+  <div class="links">
+    <a class="link" href="index.html">Map</a>
+    <a class="link" href="trends.html">Trends</a>
+    <a class="link" href="events.html">Events</a>
+    <a class="link" href="daily.html">Daily Brief</a>
+    <a class="link" href="alerts.html">Alerts</a>
+    <a class="link" href="about.html">About</a>
+    <a class="link active" href="methodology.html">Methodology</a>
+    <a class="link" href="contact.html">Contact</a>
+  </div>
+</nav>
+<main>
+  <p class="kicker">Methodology // corrections applied to published data</p>
+  <h1>Methodology</h1>
+  <p class="subtitle">
+    Published crime data misleads in specific, measurable ways if you
+    aggregate it straight. Three corrections are applied here, and every
+    number on this page is measured from the current warehouse on each
+    daily run, not asserted once and left to rot.
+  </p>
+
+  <div class="panel" id="aoristic">
+    <h2>1. Aoristic timing: the hour-of-day chart is usually wrong</h2>
+    <p>
+      Almost every "when does crime happen" chart plots the offense
+      <strong>start time</strong>. For offenses nobody witnessed, that
+      timestamp is not when the crime happened; it is
+      <strong>when the victim was last there</strong>. Park at 8 AM,
+      return at 6 PM to a broken window, and the agency records a window
+      from 8 AM to 6 PM. Plotting the start says the crime happened at
+      8 AM, which is really a chart of commuter schedules.
+    </p>
+    <p>
+      Aoristic weighting spreads each incident's single unit of
+      probability across the hours its window actually covers, in
+      proportion to how much of each hour is covered. A window of a day
+      or longer is uniform across the clock by construction. Both curves
+      below contain exactly the same total number of incidents; only the
+      placement differs.
+    </p>
+    <div class="chart-wrap"><canvas id="chart-aoristic"></canvas></div>
+    <p class="chart-caption" id="caption-aoristic">Loading...</p>
+    <div id="aoristic-stats" class="card-grid"></div>
+    <p class="chart-caption" id="aoristic-scope"></p>
+    <h3>Which offenses are most distorted</h3>
+    <p class="chart-caption">
+      Ranked by total variation distance: the share of probability mass
+      that has to move to turn the start-time curve into the aoristic
+      one. Offenses discovered after the fact sit at the top; offenses
+      with a witness present sit at the bottom, where the correction
+      barely matters.
+    </p>
+    <div class="table-scroll" id="aoristic-table"></div>
+  </div>
+
+  <div class="panel" id="nowcast">
+    <h2>2. Reporting delay: the last few days are always fake-declining</h2>
+    <p>
+      A report reaches the published dataset days after the offense. So
+      when you count incidents <em>by the date they happened</em>, the
+      most recent days are not finished yet, and every such chart bends
+      downward at the right edge. That decline is an artifact of the
+      calendar, not a drop in crime, and it is the single easiest way to
+      accidentally publish a false good-news story.
+    </p>
+    <p>
+      The fix is the same arithmetic epidemiologists use for nowcasting.
+      Using only occurrence days old enough to be complete, measure how
+      the reporting delay is distributed. That gives, for a day of any
+      age, the share of its eventual reports that should have arrived by
+      now. Dividing the observed count by that share estimates the
+      eventual total, with an interval that widens as completeness falls.
+    </p>
+    <div id="nowcast-stats" class="card-grid"></div>
+    <div class="chart-wrap"><canvas id="chart-nowcast"></canvas></div>
+    <p class="chart-caption" id="caption-nowcast">Loading...</p>
+    <p class="chart-caption" id="nowcast-scope"></p>
+  </div>
+
+  <div class="panel" id="signals">
+    <h2>3. Alert signals: controlling false alarms across hundreds of series</h2>
+    <p>
+      The Daily Brief flags unusual activity per neighborhood and
+      category. That is hundreds of separate statistical tests every
+      single day, and this is where crime "spikes" are usually
+      manufactured: run enough comparisons and some always look
+      extreme. At a naive 5 percent threshold, roughly one test in
+      twenty fires on pure noise, so a few alarming-looking alerts
+      every day are guaranteed even if nothing whatsoever changed.
+    </p>
+    <p>
+      Each series is compared against its own same-weekday baseline
+      using a Poisson tail probability, then all of the day's p-values
+      go through a <strong>Benjamini-Hochberg</strong> correction, which
+      bounds the expected share of false alarms among the signals
+      actually reported. Series whose typical volume is too low to
+      distinguish a spike from arithmetic are not tested at all.
+    </p>
+    <div id="signals-stats" class="card-grid"></div>
+    <p class="chart-caption" id="caption-signals">Loading...</p>
+    <p>
+      The honest way to check a detector with no ground truth is
+      calibration, not a precision number: generate counts from each
+      series' own baseline so that <em>every</em> series is null by
+      construction and no real spike exists, then run the detector and
+      count what fires. Anything it reports there is a false alarm by
+      definition.
+    </p>
+    <div class="table-scroll" id="calibration-table"></div>
+    <p class="chart-caption">
+      These signals describe reported data. They are not predictions,
+      and nothing here forecasts where crime will occur.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>What is not corrected</h2>
+    <ul>
+      <li><strong>Aoristic weighting needs published end times</strong>,
+        so it covers only the sources that publish them. The rest are
+        shown as start times, which is what the agency gave us.</li>
+      <li><strong>Nowcasting needs published report dates</strong>, so it
+        covers only the sources that publish them. Both scopes are
+        printed above, measured from the data.</li>
+      <li><strong>Reported crime is not total crime.</strong> No
+        statistical correction can recover offenses nobody reported, and
+        nothing here attempts to.</li>
+    </ul>
+  </div>
+
+  <footer class="data-note">
+    Built as an open analytics engineering project: incremental extraction,
+    a raw parquet landing zone, a DuckDB warehouse with a unified
+    cross-jurisdiction taxonomy, and a dependency-free static front end,
+    refreshed daily by GitHub Actions.
+   &middot; <a href="privacy.html">Privacy policy</a>
+  
+    <p class="footer-donate">Donations are not expected but greatly appreciated :) They help keep the site maintained and fund new features. <a href="https://buymeacoffee.com/heinlinnhtu" rel="noopener">Buy me a coffee</a>.</p>
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/methodology.js"></script>
+</body>
+</html>

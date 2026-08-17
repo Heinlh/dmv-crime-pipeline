@@ -27,6 +27,8 @@ import logging
 import duckdb
 import h3
 
+from export import analysis
+
 from config import SITE_DATA_DIR, WAREHOUSE_PATH
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s export: %(message)s")
@@ -317,50 +319,29 @@ def _digest(con) -> dict:
         GROUP BY 1 ORDER BY 1
     """)
 
-    # Anomaly signals: each jurisdiction x category compared to its own
-    # same-weekday average over the prior 8 weeks (dividing by all 8
-    # candidate dates so zero days count as zeros). A signal fires only
-    # when the baseline is at least SIGNAL_MIN_BASELINE, so thin slices
-    # (e.g. one homicide vs an average near zero) never masquerade as
-    # statistical spikes.
-    SIGNAL_MIN_BASELINE = 3.0
-    SIGNAL_HIGH, SIGNAL_LOW = 1.5, 0.5
-    today_slices = {
-        (r["jurisdiction"], r["offense_category"]): r["count"]
-        for r in _rows_as_dicts(con, f"""
-            SELECT jurisdiction, offense_category, COUNT(*) AS count
-            FROM marts.fct_incidents
-            WHERE CAST(occurred_at AS DATE) = {day}
-            GROUP BY 1, 2
-        """)
-    }
-    baselines = {
-        (r["jurisdiction"], r["offense_category"]): r["total"] / 8.0
-        for r in _rows_as_dicts(con, f"""
-            SELECT jurisdiction, offense_category, COUNT(*) AS total
-            FROM marts.fct_incidents
-            WHERE CAST(occurred_at AS DATE) BETWEEN {day} - 56 AND {day} - 1
-              AND dayofweek(occurred_at) = dayofweek({day})
-            GROUP BY 1, 2
-        """)
-    }
-    signals = []
-    for key, baseline in baselines.items():
-        if baseline < SIGNAL_MIN_BASELINE:
-            continue
-        count = today_slices.get(key, 0)
-        ratio = count / baseline
-        if ratio >= SIGNAL_HIGH or ratio <= SIGNAL_LOW:
-            jur, cat = key
-            signals.append({
-                "jurisdiction": jur,
-                "offense_category": cat,
-                "count": count,
-                "baseline": round(baseline, 1),
-                "ratio": round(ratio, 2),
-                "direction": "spike" if ratio >= SIGNAL_HIGH else "lull",
-            })
-    signals.sort(key=lambda s: -abs(s["ratio"] - 1.0))
+    # Anomaly signals. Every (area x category) pair is a separate
+    # hypothesis test against its own same-weekday baseline, which means
+    # hundreds of tests per day; a naive per-series threshold would fire
+    # on a steady drip of pure noise. analysis.detect_signals applies
+    # Poisson tail probabilities with a Benjamini-Hochberg correction so
+    # the expected share of false alarms among reported signals is
+    # bounded. See analysis.py for the estimator and its calibration.
+    detection = analysis.detect_signals(con, day=latest_day)
+    signals = [
+        {
+            "jurisdiction": s["jurisdiction"],
+            "area_name": s.get("area_name"),
+            "offense_category": s["offense_category"],
+            # 'count' kept for the newsletter and Daily Brief, which
+            # read this payload
+            "count": s["observed"],
+            "baseline": s["baseline"],
+            "ratio": s["ratio"],
+            "direction": s["direction"],
+            "p_value": s["p_value"],
+        }
+        for s in detection["flagged"]
+    ]
 
     bullets = []
     if trailing_avg:
@@ -408,6 +389,17 @@ def _digest(con) -> dict:
         "notable": notable,
         "last14": last14,
         "signals": signals,
+        "detection": {
+            # measured, not asserted: run the detector against simulated
+            # null data so the false-alarm claim on the methodology page
+            # is a number this pipeline actually produced
+            "calibration": analysis.calibrate_detector(con),
+            "tested": detection["tested"],
+            "flagged": len(detection["flagged"]),
+            "fdr_q": detection["fdr_q"],
+            "naive_would_flag": detection["naive_would_flag"],
+            "level": detection["level"],
+        },
         "bullets": bullets,
     }
 
@@ -422,6 +414,8 @@ def run() -> None:
     _write_json("heatmap.json", _heatmap(con))
     _write_json("hexes.json", _hexes(con))
     _write_json("digest.json", _digest(con))
+    _write_json("aoristic.json", analysis.aoristic(con))
+    _write_json("nowcast.json", analysis.nowcast(con))
 
     con.close()
     logger.info("Site data export complete")
