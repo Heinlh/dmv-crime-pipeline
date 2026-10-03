@@ -9,6 +9,7 @@ Runs against a temp raw/warehouse/site-data dir (not data/ and site/data)
 so it's safe to run even after a real pipeline run in this checkout."""
 
 import json
+import random as _random
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -273,4 +274,96 @@ assert "2016-08-15" in trend_dates, "full-history trends must include the 2016 r
 assert all(len(r) == 4 for r in trends["rows"]), "trends rows are [date, jurisdiction, category, count]"
 assert trends["populations"] == summary["populations"], "populations must ship with trends.json"
 
-print("\nAll assertions passed: dedupe, idempotency, geocode nulling, taxonomy mapping, site export.")
+# --- statistical corrections (export/analysis.py) ---------------------
+# These estimators are asserted against hand-computable cases on a
+# purpose-built warehouse rather than the fixture set above, so the
+# expected values are exact rather than incidental.
+import datetime as _dt  # noqa: E402
+
+from export import analysis  # noqa: E402
+
+_an = duckdb.connect()
+_an.execute("CREATE SCHEMA marts")
+_an.execute("""CREATE TABLE marts.fct_incidents (
+  incident_key VARCHAR, jurisdiction VARCHAR, offense_category VARCHAR,
+  area_name VARCHAR, occurred_at TIMESTAMP, occurred_end_at TIMESTAMP,
+  reported_at TIMESTAMP, severity_weight TINYINT)""")
+
+_midnight = _now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=10)
+_an.executemany("INSERT INTO marts.fct_incidents VALUES (?,?,?,?,?,?,?,?)", [
+    # 4 hour window 08:00-12:00 -> 0.25 to each of hours 8, 9, 10, 11
+    ("a", "dc", "property", "W1", _midnight + timedelta(hours=8),
+     _midnight + timedelta(hours=12), None, 3),
+    # no end time -> stays a point mass of 1.0 on hour 22
+    ("b", "dc", "violent", "W1", _midnight + timedelta(hours=22), None, None, 7),
+    # exactly 24 hours -> uniform 1/24 across every hour of the clock
+    ("c", "dc", "property", "W1", _midnight + timedelta(hours=9),
+     _midnight + timedelta(hours=33), None, 3),
+    # 10:30-11:30 -> half to hour 10, half to hour 11
+    ("d", "dc", "property", "W1", _midnight + timedelta(hours=10, minutes=30),
+     _midnight + timedelta(hours=11, minutes=30), None, 3),
+])
+
+_ao = analysis.aoristic(_an)
+_hours = {r["hour"]: r for r in _ao["by_hour"]}
+assert _ao["coverage"] == {"incidents": 4, "with_window": 3, "uniform_windows": 1,
+                          "pct_with_window": 75.0}, _ao["coverage"]
+# the conventional curve puts every incident on its start hour
+assert _hours[8]["start"] == 1 and _hours[11]["start"] == 0, "start curve must use start hours"
+# aoristic placement, hand-computed
+_expected = {8: 0.25 + 1 / 24, 9: 0.25 + 1 / 24, 10: 0.75 + 1 / 24,
+             11: 0.75 + 1 / 24, 22: 1 + 1 / 24}
+for _h in range(24):
+    _want = _expected.get(_h, 1 / 24)
+    assert abs(_hours[_h]["aoristic"] - _want) < 1e-2, (_h, _hours[_h]["aoristic"], _want)
+# every incident contributes exactly one unit of probability mass
+_mass = sum(r["aoristic"] for r in _ao["by_hour"])
+assert abs(_mass - 4.0) < 0.05, f"aoristic mass must be conserved, got {_mass}"
+assert abs(sum(r["start"] for r in _ao["by_hour"]) - 4.0) < 1e-6
+assert _ao["distortion"]["tvd"] > 0, "start and aoristic curves must differ here"
+
+# nowcast: half of all reports arrive same day, half two days later, so a
+# day of age 0 is exactly 50% complete and 10 observed implies 20 eventual
+_rows_nc, _k = [], 0
+for _d in range(analysis.MATURITY_DAYS, 200):
+    _occ = _dt.date.today() - timedelta(days=_d)
+    for _i in range(10):
+        _delay = 0 if _i < 5 else 2
+        _rows_nc.append((f"m{_k}", "dc", "property", "W1",
+                         _dt.datetime.combine(_occ, _dt.time(12)), None,
+                         _dt.datetime.combine(_occ + timedelta(days=_delay), _dt.time(12)), 3))
+        _k += 1
+for _i in range(10):
+    _today = _dt.date.today()
+    _rows_nc.append((f"r{_k}", "dc", "property", "W1",
+                     _dt.datetime.combine(_today, _dt.time(12)), None,
+                     _dt.datetime.combine(_today, _dt.time(12)), 3))
+    _k += 1
+_an.executemany("INSERT INTO marts.fct_incidents VALUES (?,?,?,?,?,?,?,?)", _rows_nc)
+
+_nc = analysis.nowcast(_an)
+assert _nc["delay"]["median_days"] == 0 and _nc["delay"]["p90_days"] == 2, _nc["delay"]
+assert abs(_nc["completeness"][0] - 0.5) < 1e-6, _nc["completeness"][:3]
+assert abs(_nc["completeness"][2] - 1.0) < 1e-6, _nc["completeness"][:3]
+_age0 = [s for s in _nc["series"] if s["age_days"] == 0][0]
+assert _age0["observed"] == 10 and abs(_age0["estimate"] - 20.0) < 1e-6, _age0
+assert _age0["lower"] >= _age0["observed"], "interval must not fall below what was observed"
+assert _age0["upper"] > _age0["estimate"], "interval must widen with incompleteness"
+
+# Poisson tails against values computed independently from the series
+# definition (sum of e^-lam lam^k / k!), not from the implementation
+assert abs(analysis._poisson_sf(10, 3) - 0.0011024881) < 1e-9
+assert abs(analysis._poisson_cdf(1, 6) - 0.0173512652) < 1e-9
+
+# Benjamini-Hochberg: step-up rejects through the largest satisfying rank
+assert analysis.benjamini_hochberg([0.001, 0.008, 0.039, 0.041, 0.9], 0.10) == \
+    [True, True, True, True, False]
+# and controls false alarms on pure noise, where a naive cut does not
+_rng = _random.Random(7)
+_nulls = [_rng.random() for _ in range(1000)]
+assert sum(analysis.benjamini_hochberg(_nulls, 0.10)) == 0, "BH must not fire on pure null"
+assert sum(1 for _p in _nulls if _p <= 0.05) > 30, "naive threshold should fire often on null"
+_an.close()
+
+print("\nAll assertions passed: dedupe, idempotency, geocode nulling, taxonomy mapping,")
+print("site export, aoristic weighting, reporting-delay nowcast, and FDR-controlled signals.")

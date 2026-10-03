@@ -85,16 +85,30 @@ function renderSignals(digest) {
   const box = document.getElementById("signals");
   const signals = digest.signals || [];
   if (!signals.length) {
-    box.innerHTML = `<p class="signal-none">No slice of the data strayed far from its 8-week baseline. All quiet on the statistical front.</p>`;
+    const d0 = digest.detection;
+    box.innerHTML = `<p class="signal-none">Nothing cleared the multiple-comparison correction` +
+      (d0 ? ` across ${d0.tested.toLocaleString()} tested series` : "") +
+      `. All quiet on the statistical front.</p>`;
     return;
   }
-  box.innerHTML = signals.map(s => `
+  box.innerHTML = signals.map(s => {
+    const where = s.area_name
+      ? `${esc(s.area_name)}, ${esc(jurisdictionLabel(s.jurisdiction))}`
+      : esc(jurisdictionLabel(s.jurisdiction));
+    return `
     <div class="signal ${s.direction === "spike" ? "spike" : "lull"}">
       <span class="dir">${s.direction === "spike" ? "&#9650; SPIKE" : "&#9660; LULL"}</span>
-      <span class="what">${esc(categoryLabel(s.offense_category))} &middot; ${esc(jurisdictionLabel(s.jurisdiction))}</span>
+      <span class="what">${esc(categoryLabel(s.offense_category))} &middot; ${where}</span>
       <span class="nums mono">${s.count} vs typical ${s.baseline.toFixed(0)} (&times;${s.ratio.toFixed(1)})</span>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
+  const d = digest.detection;
+  if (d) {
+    box.insertAdjacentHTML("beforeend",
+      `<p class="signal-none">${signals.length} of ${d.tested.toLocaleString()} tested series ` +
+      `cleared the multiple-comparison correction. An uncorrected threshold would have ` +
+      `reported ${d.naive_would_flag.toLocaleString()}.</p>`);
+  }
 }
 
 function renderNotable(digest) {

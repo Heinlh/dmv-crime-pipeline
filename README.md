@@ -39,8 +39,10 @@ jurisdiction and category over the full history since 2016, so the trends
 page can serve any period without incident-level data in the browser, plus
 jurisdiction populations for the per-100k toggle), `heatmap.json` (weekday
 x hour counts), `hexes.json` (H3 hex-cell counts over 7 and 30 day windows
-with boundary polygons precomputed so the browser needs no H3 library), and
-`digest.json` (the daily brief, including same-weekday anomaly signals).
+with boundary polygons precomputed so the browser needs no H3 library),
+`aoristic.json` and `nowcast.json` (the two time corrections described
+below), and `digest.json` (the daily brief, including FDR-corrected
+anomaly signals and the detector's own null calibration).
 `export/render_og_card.py` then renders a daily 1200x630 Open Graph share
 card as a PNG, in Python via cairosvg, no headless browser. `site/` is a static, dependency-free
 HTML/CSS/JS app (Leaflet + Leaflet.markercluster + Chart.js from CDN, no
@@ -52,7 +54,8 @@ palette is validated for colorblind safety against the dark surface:
 | site/index.html | Map: freshness banner, plain-English weekly summary and KPI tiles, then the clustered incident map (hover a dot for the offense, click for the full summary card) with a live-count legend, filterable by jurisdiction, date range, category, severity; a Google-Maps-style search box (autocomplete over crime types and places, built from the loaded data so no geocoder is called); H3 hotspot shading (off / 7d / 30d) and a day-by-day playback scrubber over the last 30 days |
 | site/trends.html | Full-history trends with period presets (90D / 1Y / YTD / ALL) plus a custom month range (e.g. 2017-2020) and day/week/month granularity; COUNTS / PER 100K toggle (Census Vintage 2023 populations); volume line, category breakdown with prior-period deltas, day/daypart heatmap, table view per chart |
 | site/events.html | Searchable incident log over the last 90 days: free-text search (offense, street, case number, district) plus jurisdiction/category/date/sort filters, rendered as summary cards with factual plain-English titles (agency label always shown) |
-| site/daily.html | Daily Brief: plain-English bullets for the latest data day, anomaly signals (each jurisdiction x category vs its own 8-week same-weekday baseline), category and 14-day charts, and the day's most serious incidents; powered by digest.json |
+| site/daily.html | Daily Brief: plain-English bullets for the latest data day, anomaly signals (each neighborhood x category vs its own 8-week same-weekday baseline, corrected for multiple comparisons), category and 14-day charts, and the day's most serious incidents; powered by digest.json |
+| site/methodology.html | The three statistical corrections, each with the measured effect from the current run: aoristic weighting vs the naive start-time chart, the reporting-delay nowcast with its uncertainty band, and the signal detector's false-alarm calibration. Every number on the page comes from a payload, none are hardcoded |
 | site/alerts.html | Email signup for the daily brief, handled entirely by Buttondown (double opt-in, unsubscribe, subscriber dashboard); shows setup instructions until BUTTONDOWN_USERNAME is configured in site/js/common.js |
 | site/privacy.html | Plain-English privacy policy: no first-party data collection, third-party services disclosed, email handling explained |
 | site/about.html | Purpose, sources, pipeline mechanics, and honest caveats, written for a non-technical visitor |
@@ -67,6 +70,63 @@ the site; signup tracking lives in Buttondown's dashboard.
 `CATEGORY_DESCRIPTIONS`), colors, and formatters used across pages, so raw
 taxonomy values (`offense_category`, NIBRS codes, etc.) never reach the UI
 directly.
+
+## Statistical corrections
+
+`export/analysis.py` sits between the warehouse and the site and applies
+three corrections for ways published crime data misleads when aggregated
+naively. All three are computed at build time from whatever the warehouse
+holds, so the figures on the Methodology page are measured on the current
+run rather than asserted. The module is deliberately dependency-free
+(`math` only, no scipy); every distribution used is small enough that
+direct summation is exact.
+
+Not every source supports every correction: aoristic weighting needs
+published offense end times, nowcasting needs published report dates. The
+applicable jurisdictions are derived from the data itself, so a new source
+enrolls automatically the day it starts publishing the column, and each
+payload carries its own scope so the site can say exactly what was covered
+instead of implying the whole region was.
+
+1. **Aoristic weighting** (`aoristic()`). Hour-of-day charts are almost
+   always built from the offense start time. For offenses discovered later
+   (burglary, theft from a vehicle) that start time is really "when the
+   victim was last there", so the conventional chart measures victim
+   schedules rather than offense timing. Each incident's single unit of
+   probability is instead spread uniformly across its published start-to-end
+   window; a window of 24 hours or more carries no hour-of-day information
+   at all and contributes exactly 1/24 to every hour. The payload carries
+   both curves and the total variation distance between them, per category,
+   so the size of the distortion is visible rather than claimed.
+2. **Reporting-delay nowcasting** (`nowcast()`). Reports arrive days after
+   the offense, so the newest days of any occurrence-date series are
+   structurally undercounted and the right edge of every trend line slopes
+   down for entirely artificial reasons. The empirical delay CDF is fitted
+   on mature days only (older than `MATURITY_DAYS`, since younger days are
+   themselves still filling in), and recent days are rescaled by their
+   expected completeness `F(a)`. Intervals come from binomial thinning.
+   Below `MIN_COMPLETENESS` the correction amplifies noise faster than it
+   removes bias, so those days are published as observed-only and labeled
+   as such rather than extrapolated.
+3. **FDR-controlled signal detection** (`detect_signals()`,
+   `calibrate_detector()`). The Daily Brief compares hundreds of
+   (area x category) series against their own 8-week same-weekday baselines
+   every day. At that many tests an uncorrected 5% threshold produces
+   alarming-looking alerts daily from pure chance. Per-series Poisson tail
+   probabilities are corrected with Benjamini-Hochberg at `FDR_Q = 0.10`.
+   Because real alerts have no ground truth, the honest backtest is null
+   calibration: `calibrate_detector()` redraws every series from its own
+   fitted baseline (so no real spike exists by construction) and reports the
+   realized false-alarm rate for both the naive and corrected thresholds.
+   Those measured rates are published on the Methodology page, and the
+   digest carries how many signals an uncorrected threshold would have
+   reported alongside how many survived.
+
+What is deliberately *not* corrected is stated on the page too: reporting
+rates (crimes never reported to police are invisible to every source here),
+differences in how agencies classify the same conduct, and any form of
+prediction. The corrections make the descriptive record less misleading;
+they do not turn it into a forecast.
 
 ## Security and privacy posture
 
@@ -157,6 +217,15 @@ API-shaped records and asserts dedupe, idempotency, geocode nulling,
 taxonomy mapping, and the exported site JSON (including that old records
 stay in the full-history trends but out of the 90 day incident window),
 with no network required.
+
+The statistical corrections are tested against hand-computable references
+rather than golden files: a purpose-built four-incident warehouse whose
+aoristic mass placement can be worked out on paper (and must still sum to
+exactly the incident count), a delay distribution rigged so a day observed
+at 50% completeness must nowcast to precisely twice its observed count,
+Poisson tail probabilities checked to 1e-9 against values re-derived from
+the series definition, a Benjamini-Hochberg case with a known rejection
+set, and 1000 simulated null days that must produce zero rejections.
 
 ## Viewing the site locally
 

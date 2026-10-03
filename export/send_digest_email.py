@@ -179,6 +179,8 @@ def build_narrative(digest: dict) -> list[str]:
         described = []
         for s in signals[:3]:
             s_jur = JURISDICTION_LABELS.get(s["jurisdiction"], s["jurisdiction"])
+            if s.get("area_name"):
+                s_jur = f"{s['area_name']}, {s_jur}"
             s_cat = CATEGORY_LABELS.get(s["offense_category"], s["offense_category"])
             if s["direction"] == "spike":
                 described.append(
@@ -192,8 +194,10 @@ def build_narrative(digest: dict) -> list[str]:
                   else f"{len(described)} figures step out of line: ")
         paras.append(
             f"Set against eight weeks of {weekday}s, {opener}"
-            f"{'; '.join(described)}. Single days make noise, not verdicts, "
-            f"but these are the deviations worth watching.")
+            f"{'; '.join(described)}. These survived a correction for the "
+            f"hundreds of comparisons behind them, so they are not simply the "
+            f"loudest of many coin flips. Single days still make noise, not "
+            f"verdicts, but these are the deviations worth watching.")
 
     homicide = next((r for r in cats if r["offense_category"] == "homicide"), None)
     if homicide:
