@@ -32,6 +32,30 @@
   --warn: #ffb454;           /* amber: warnings / elevated activity */
   --good: #3ddc97;           /* teal-green: improving / falling numbers */
 
+  /* --- map plane ---
+     The basemap is Esri Dark Gray Canvas, which ships lighter than the
+     page plane: its land measures #4d4c4f and its water #474749. Every
+     category color was validated against --bg, and on bare Esri grey all
+     seven drop to between 1.79:1 and 3.02:1, so all seven fail the 3:1
+     floor. --map-filter pulls the base tiles down to roughly #161617,
+     which restores the surface the palette was validated against instead
+     of repainting the palette to chase the basemap.
+     Esri ships its labels as a separate layer, so --map-label-filter dims
+     them only slightly: applying the base filter to both would drag
+     Esri's label grey (#9a999c) down to about #3a3a3a and cost the map
+     its street and place names, which are what orients a reader.
+     Markers live in their own panes and are never filtered. */
+  --map-filter: brightness(0.42) saturate(0.55) contrast(1.08);
+  --map-label-filter: brightness(0.82) saturate(0.5);
+
+  /* navy and teal, reading against the darkened plane above */
+  --cluster-fill: #102a43;
+  --cluster-ring: #2dd4bf;
+  --cluster-ink: #7fe9dd;
+  --cluster-halo: rgba(45, 212, 191, 0.22);
+  --hotspot: #2dd4bf;
+  --marker-ring: #0b1b2b;   /* dot outline, a touch warmer than --bg */
+
   /* --- glow (used sparingly: hover, focus, active) --- */
   --glow-cyan: 0 0 16px rgba(77, 227, 255, 0.16);
   --glow-cyan-focus: 0 0 0 3px rgba(77, 227, 255, 0.22);
@@ -457,12 +481,19 @@ nav.topnav a.link.active {
 .incident-card .row strong { color: var(--text); font-weight: 600; }
 .incident-card .row.agency { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); margin-top: 0.25rem; }
 
+/* Basemap plane. Only the tile layers are filtered, and the two are
+   filtered differently; markers, clusters, hotspots, tooltips and
+   controls sit in sibling panes and keep their true colors.
+   See --map-filter for why this exists. */
+.leaflet-tile-pane .basemap-base { filter: var(--map-filter); }
+.leaflet-tile-pane .basemap-labels { filter: var(--map-label-filter); }
+
 /* marker cluster bubbles: fully self-contained styling (the plugin's
    MarkerCluster.Default.css is intentionally not loaded) */
 .marker-cluster {
   background-clip: padding-box;
   border-radius: 20px;
-  background: rgba(77, 227, 255, 0.22);
+  background: var(--cluster-halo);
 }
 .marker-cluster div {
   width: 30px;
@@ -471,12 +502,12 @@ nav.topnav a.link.active {
   margin-top: 5px;
   border-radius: 15px;
   text-align: center;
-  background: rgba(16, 16, 29, 0.92);
-  color: var(--accent);
+  background: var(--cluster-fill);
+  color: var(--cluster-ink);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
-  border: 1px solid var(--accent-dim);
+  border: 1px solid var(--cluster-ring);
 }
 .marker-cluster span { line-height: 28px; }
 
