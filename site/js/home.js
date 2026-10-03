@@ -100,14 +100,22 @@ const BASEMAP_ATTRIBUTION =
   'Tiles &copy; <a href="https://www.esri.com/">Esri</a>, ' +
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
+// The two layers are filtered separately (see --map-filter): the base is
+// pushed down near the page plane so the category palette keeps the
+// contrast it was validated against, while the label layer is only
+// slightly dimmed. Filtering both equally would drag Esri's label grey
+// down to roughly #3a3a3a and cost the map its street and place names,
+// which are what orients a reader.
 L.tileLayer(`${ESRI_CANVAS}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
   attribution: BASEMAP_ATTRIBUTION,
+  className: "basemap-base",
   maxZoom: 19,
   maxNativeZoom: 16,
   zIndex: 1,
 }).addTo(map);
 
 L.tileLayer(`${ESRI_CANVAS}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+  className: "basemap-labels",
   maxZoom: 19,
   maxNativeZoom: 16,
   zIndex: 2,
@@ -133,6 +141,15 @@ let hexData = null;
 
 // --- hotspot hex layer ---
 
+// Keep the top quarter of cells by incident count; the rest draw nothing.
+const HOTSPOT_PERCENTILE = 0.25;
+// Teal, matching the cluster ring against the darkened basemap.
+const HOTSPOT_COLOR = "#2dd4bf";
+// Outline on incident dots. Separates a dot from the plane behind it at
+// any zoom, which matters more now that the basemap is filtered rather
+// than uniformly near-black.
+const MARKER_RING = "#0b1b2b";
+
 function renderHotspots() {
   hotspotGroup.clearLayers();
   const windowDays = document.getElementById("f-hotspots").value;
@@ -140,19 +157,32 @@ function renderHotspots() {
   const cells = hexData.windows[windowDays];
   if (!cells.length) return;
   const max = cells[0][1]; // exporter sorts by count desc
+
+  // Shade only genuine concentrations. Shading every populated cell put a
+  // faint wash over the whole region, which read as "crime everywhere" and
+  // buried the incident dots under it. Cells below the 75th percentile of
+  // this window's counts now draw nothing, so the shading marks where
+  // reports actually pile up rather than where anyone lives.
+  const counts = cells.map(c => c[1]);           // already sorted desc
+  const floorIndex = Math.floor(counts.length * HOTSPOT_PERCENTILE);
+  const floor = counts[Math.min(floorIndex, counts.length - 1)];
+
   for (const [hex, count, topCat] of cells) {
+    if (count < floor) continue;
     const boundary = hexData.boundaries[hex];
     if (!boundary) continue;
-    // single-hue cyan ramp; sqrt-ish exponent keeps mid-range cells
-    // visible without letting the top cell wash out the basemap
-    const intensity = Math.pow(count / max, 0.6);
+    // Single-hue teal ramp over the surviving cells. The ramp is rescaled
+    // to start at the floor, so the dimmest drawn cell is still clearly a
+    // mark rather than fading into the basemap.
+    const span = Math.max(max - floor, 1);
+    const intensity = Math.pow((count - floor) / span, 0.6);
     const polygon = L.polygon(boundary, {
       pane: "hotspots",
       stroke: true,
-      color: "rgba(77, 227, 255, 0.35)",
+      color: "rgba(45, 212, 191, 0.40)",
       weight: 1,
-      fillColor: "#4de3ff",
-      fillOpacity: 0.06 + 0.30 * intensity,
+      fillColor: HOTSPOT_COLOR,
+      fillOpacity: 0.10 + 0.34 * intensity,
     });
     polygon.bindTooltip(
       `${count.toLocaleString()} incident${count === 1 ? "" : "s"} in the last ${windowDays} days` +
@@ -294,12 +324,12 @@ function applyFilters() {
 
     const color = CATEGORY_COLORS[inc.offense_category] || CATEGORY_COLORS.other;
     // Uniform radius: category is the only encoding on the dot. The 2px
-    // page-color stroke is the "surface ring" keeping overlaps legible.
+    // stroke is the "surface ring" keeping overlaps legible.
     const marker = L.circleMarker([inc.latitude, inc.longitude], {
       radius: 7,
       fillColor: color,
       fillOpacity: 0.85,
-      color: "#0a0a14",
+      color: MARKER_RING,
       weight: 2,
     });
     marker.bindTooltip(incidentTitle(inc), { direction: "top", opacity: 1 });
