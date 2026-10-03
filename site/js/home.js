@@ -84,9 +84,33 @@ function populateCategoryFilter() {
 const map = L.map("map", { zoomControl: false }).setView([38.95, -77.05], 10);
 // zoom on the top-right so the search overlay owns the top-left corner
 L.control.zoom({ position: "topright" }).addTo(map);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+// Basemap: Esri's Dark Gray Canvas, which needs no API key or account.
+// We used CARTO's dark_all until CARTO began watermarking keyless
+// requests in August 2026; those tiles still returned HTTP 200 with a
+// valid PNG, so nothing errored and the map silently filled with "API
+// KEY REQUIRED" text. Prefer a keyless provider here so the map cannot
+// be taken out by someone else's billing change.
+// Esri splits the style in two: a label-free base and a transparent
+// reference layer carrying street and place names. Both are tile
+// layers, so both sit under the marker pane; zIndex orders them within
+// it. Esri renders this style down to zoom 16, so maxNativeZoom lets
+// Leaflet upscale past that instead of dropping to blank tiles.
+const ESRI_CANVAS = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
+const BASEMAP_ATTRIBUTION =
+  'Tiles &copy; <a href="https://www.esri.com/">Esri</a>, ' +
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+L.tileLayer(`${ESRI_CANVAS}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
+  attribution: BASEMAP_ATTRIBUTION,
   maxZoom: 19,
+  maxNativeZoom: 16,
+  zIndex: 1,
+}).addTo(map);
+
+L.tileLayer(`${ESRI_CANVAS}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+  maxZoom: 19,
+  maxNativeZoom: 16,
+  zIndex: 2,
 }).addTo(map);
 
 const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 46 });
