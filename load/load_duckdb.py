@@ -11,7 +11,8 @@ import logging
 
 import duckdb
 
-from config import PROJECT_ROOT, RAW_DIR, WAREHOUSE_PATH
+import config
+from config import PROJECT_ROOT
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s loader: %(message)s")
 logger = logging.getLogger(__name__)
@@ -24,66 +25,38 @@ SOURCES = {
     "pwc": "raw.pwc_incidents",
 }
 
-# Columns sql/transform.sql references per raw table. Socrata (and to a
-# lesser degree ArcGIS) omit null fields from responses entirely, so a
-# batch where every record lacks a field lands parquet without that
-# column. Backfill them as NULL VARCHAR so the transform never crashes
-# on a sparse batch.
-EXPECTED_COLUMNS = {
-    "raw.moco_incidents": [
-        "incident_id", "case_number", "start_date", "end_date", "crimename2",
-        "crimename3", "location", "city", "zip_code", "district", "latitude",
-        "longitude", "victims",
-    ],
-    "raw.dc_incidents": [
-        "CCN", "REPORT_DAT", "START_DATE", "END_DATE", "OFFENSE", "BLOCK",
-        "WARD", "LATITUDE", "LONGITUDE", "METHOD",
-    ],
-    # PG County renamed columns between its dataset generations, so the
-    # transform coalesces across every candidate name; padding them all
-    # keeps that SQL valid whichever generation a batch came from.
-    "raw.pgc_incidents": [
-        "incident_case_id", "id", "date", "clearance_code_inc_type",
-        "offense", "inc_type", "street_address", "location", "address",
-        "city", "zip_code", "pgpd_sector", "sector", "pgpd_beat",
-        "latitude", "longitude",
-    ],
-    # FCPD's three services use different column names (Person/Property:
-    # DateReported + ViolationCodeReference_Descript; Society: ReportDate
-    # + EventDescription/IBRDescription), so the transform coalesces and
-    # the loader pads every candidate.
-    "raw.fairfax_incidents": [
-        "UniqueID", "DateReported", "ReportDate", "BeginDate", "IBRCode",
-        "IBRDescription", "IncidentNumber", "ViolationCodeReference_Descript",
-        "EventDescription", "Category", "Station", "PatrolArea", "DISTRICT",
-        "latitude", "longitude",
-    ],
-    "raw.pwc_incidents": [
-        "InstanceID", "CaseNo", "OccurredOn", "OccurredBetween",
-        "BlockAddress", "City", "State", "ZipCode", "IBRCode",
-        "CrimeCategory", "latitude", "longitude",
-    ],
-}
+
+def expected_columns(source: str) -> list[str]:
+    """Every column a raw table must have for sql/transform.sql to bind:
+    the source's allowlist (config `fields`) plus the lineage column.
+    Socrata (and to a lesser degree ArcGIS) omit null fields from
+    responses entirely, so a batch where every record lacks a field lands
+    parquet without that column, and some sources have changed column
+    names over time; padding the full allowlist as NULL VARCHAR keeps the
+    transform valid whichever generation or sparsity a batch has."""
+    return config.allowed_fields(source)
 
 
 def run() -> None:
-    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(WAREHOUSE_PATH))
+    warehouse_path = config.WAREHOUSE_PATH
+    raw_dir = config.RAW_DIR
+    warehouse_path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(warehouse_path))
 
     con.execute((PROJECT_ROOT / "sql" / "schema.sql").read_text())
     logger.info("Schema applied")
 
     loaded_any = False
     for source, table in SOURCES.items():
-        glob = RAW_DIR / source / "*" / "*.parquet"
-        if not list((RAW_DIR / source).glob("*/*.parquet")):
+        glob = raw_dir / source / "*" / "*.parquet"
+        if not list((raw_dir / source).glob("*/*.parquet")):
             logger.warning("No raw files for %s yet, skipping", source)
             continue
         con.execute(f"""
             CREATE OR REPLACE TABLE {table} AS
             SELECT * FROM read_parquet('{glob.as_posix()}', union_by_name=true)
         """)
-        for column in EXPECTED_COLUMNS[table]:
+        for column in expected_columns(source):
             con.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{column}" VARCHAR')
         count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         logger.info("Rebuilt %s: %d rows", table, count)

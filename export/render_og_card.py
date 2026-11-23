@@ -19,7 +19,8 @@ from xml.sax.saxutils import escape
 
 import cairosvg
 
-from config import PROJECT_ROOT, SITE_DATA_DIR
+import config
+from config import PROJECT_ROOT
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s og: %(message)s")
 logger = logging.getLogger(__name__)
@@ -160,7 +161,7 @@ def build_svg(digest: dict) -> str:
 
 
 def run() -> None:
-    digest_path = SITE_DATA_DIR / "digest.json"
+    digest_path = config.SITE_DATA_DIR / "digest.json"
     if not digest_path.exists():
         logger.warning("digest.json not found; skipping OG card")
         return

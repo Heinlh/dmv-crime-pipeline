@@ -10,10 +10,43 @@ across jurisdictions.
 ## Architecture
 
 ```
-Socrata API (MoCo)  ─┐
-                     ├─> extractors/ ─> data/raw/{source}/*.parquet ─> load/ ─> DuckDB ─> export/ ─> site/data/*.json
-ArcGIS API (DC)     ─┘        (incremental, watermarked)                 (raw -> marts.fct_incidents)   (static JSON)
+5 agency APIs ─> extractors/ ─> raw/{source}/*.parquet ─> load/ ─> DuckDB ─> export/ ─> site/data/*.json ─> GitHub Pages
+ (Socrata,       (allowlisted     on the `data` branch        (raw -> marts.fct_incidents)    (static JSON)
+  ArcGIS)         fields only)    (the system of record)
 ```
+
+## Where the data lives
+
+| What | Where | Lifetime |
+|---|---|---|
+| Raw parquet zone + watermarks | the repo's `data` branch | permanent, versioned |
+| DuckDB warehouse | built in CI from the `data` branch | one run |
+| `site/data/*.json` | exported in CI, deployed to Pages | until the next deploy |
+
+The `data` branch is the pipeline's only durable state. Each run checks it
+out beside `main` as a worktree (`scripts/datastore.sh open`), points the
+pipeline at it through `DMV_RAW_DIR` and `DMV_STATE_PATH`, and pushes the
+new batches back (`scripts/datastore.sh save`, a no-op on a quiet day).
+Everything downstream is rebuilt from it on every run, so a transform fix
+applies to the whole history at once, and any past day's raw data is a
+commit away. Each parquet file is one extraction batch, and every row
+carries `_extracted_at`, when it was fetched, so an agency's correction can
+be told from the version it replaces. The branch has its own README
+(`scripts/data_branch_readme.md`).
+
+The raw zone is public, so it holds only each source's allowlisted
+`fields` (`config.py`): the columns the transform reads, plus record
+identifiers. Agencies publish more, including house numbers, geocoded street
+addresses, victim demographics and officer IDs, and none of it is requested
+or landed; `land_raw` enforces the allowlist whatever an extractor fetched.
+Prince George's County publishes exact house addresses with coordinates
+geocoded to them, so before landing, `extractors/privacy.py` rounds the
+house number down to its block and coordinates to 3 decimal places.
+
+Before the `data` branch existed, the raw zone lived only in the Actions
+cache. The first run that finds no `data` branch restores that cache and
+seeds the branch from it (`scripts/migrate_raw_zone.py`), applying the
+same allowlists and coarsening to the history.
 
 Layers in the warehouse (data/warehouse/crime.duckdb):
 
@@ -181,10 +214,13 @@ dedupes on the source incident id, so overlap never produces duplicates.
 
 ## Design decisions
 
-1. Raw means raw. The landing zone stores exactly what the APIs return,
-   as strings. All typing, renaming, and cleaning happens in SQL, so the
-   pipeline never breaks on a source-side type quirk and the warehouse
-   can always be rebuilt from parquet.
+1. Raw means raw, within the allowlist. The landing zone stores the
+   allowlisted fields exactly as the APIs return them, as strings. All
+   typing, renaming, and cleaning happens in SQL, so the pipeline never
+   breaks on a source-side type quirk and the warehouse can always be
+   rebuilt from parquet. The one exception is location detail finer than
+   a block, which is coarsened before landing because the raw zone is
+   public.
 2. Idempotent everywhere. Raw tables are full rebuilds from the parquet
    zone; the fact table uses INSERT OR REPLACE on a globally unique
    incident_key. Re-running any step is always safe.
@@ -193,8 +229,10 @@ dedupes on the source incident id, so overlap never produces duplicates.
    NIBRS categories with dozens of values, mapped by documented keyword
    rules in sql/transform.sql. Both migrate directly to dbt seeds and
    models in the next phase.
-4. Locations stay block-level as published. Failed geocodes (DC reports
-   these as 0,0) are stored as NULL, never guessed.
+4. Locations stay block-level, never sharper. Where an agency publishes
+   something finer (Prince George's County's exact house addresses), it
+   is coarsened to the block at landing. Failed geocodes (DC reports these
+   as 0,0) are stored as NULL, never guessed.
 
 ## Data notes
 
@@ -209,10 +247,37 @@ dedupes on the source incident id, so overlap never produces duplicates.
 ## Testing
 
 ```
+pip install -r requirements.txt -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest
+```
+
+Four tiers under `tests/`, run on every pull request by
+`.github/workflows/test.yml`. None of them touch the network, apart from
+the browser tier loading the site's CDN libraries as a visitor would.
+
+| Tier | Covers |
+|---|---|
+| `unit` | field allowlists, block-level coarsening, landing, extraction stamps, path overrides |
+| `integration` | every real extractor against faked agency APIs (`tests/fakes.py`), the loader and transform on what they land, the raw-zone migration, and `datastore.sh` against a throwaway git remote |
+| `e2e` | `run_pipeline.main()` over several simulated days with all state carried by a `data` branch, a rebuild from the branch alone with every agency down, and the first-run migration |
+| `browser` | the built site in Chromium through Playwright: map, case lookup, events search, and that no exact address reaches a visitor |
+
+The faked agencies publish the same extra fields the real ones do (house
+numbers, victim demographics), so the tests prove those are never
+requested or landed. Behind a proxy or offline, `TEST_VENDOR_DIR` points
+the browser tier at a local `node_modules/` holding Leaflet,
+Leaflet.markercluster and Chart.js, and `PW_CHROMIUM_EXECUTABLE` at a
+specific Chromium build.
+
+The original standalone script still runs on its own (and as part of the
+`e2e` tier):
+
+```
 python test_pipeline_offline.py
 ```
 
-Runs the full land, load, transform, and export path against synthetic
+It runs the full land, load, transform, and export path against synthetic
 API-shaped records and asserts dedupe, idempotency, geocode nulling,
 taxonomy mapping, and the exported site JSON (including that old records
 stay in the full-history trends but out of the 90 day incident window),
@@ -254,12 +319,11 @@ this repo can do for you):
    -> Run workflow) to confirm it deploys, then let the daily schedule take
    over.
 
-Note: `data/` and `state/` are gitignored, so the workflow carries the raw
-parquet zone and the watermarks between daily runs with `actions/cache`.
-On a cache hit each run pulls only the last day or so; on a miss (first
-run, or cache evicted) it re-backfills the full history from
-`BACKFILL_START`, which is slower but safe because every downstream step
-is idempotent.
+The workflow needs `contents: write` to push the `data` branch. That
+token can also push to `main`, so a branch protection rule (or ruleset)
+on `main` requiring pull requests is recommended. A fresh fork with no
+`data` branch and no legacy cache backfills the full history from
+`BACKFILL_START` on its first run, which is slow but safe.
 
 ## Roadmap
 

@@ -9,6 +9,9 @@ by start_date so pagination is stable, and advance the watermark to the
 max start_date seen. A small overlap window is subtracted from the
 watermark to catch late-arriving records; downstream loading dedupes on
 incident_id so overlap never creates duplicates.
+
+Only allowlisted fields are requested ($select), intersected with the
+columns the dataset publishes; see config MOCO["fields"].
 """
 
 import logging
@@ -16,7 +19,8 @@ import os
 from datetime import datetime, timedelta
 
 from config import MOCO
-from extractors.base import land_raw, make_session, read_watermark, request_json, write_watermark
+from extractors.base import (land_raw, make_session, read_watermark, request_json,
+                             select_fields, socrata_columns, write_watermark)
 
 logger = logging.getLogger("moco")
 
@@ -37,11 +41,13 @@ def extract() -> list[dict]:
     # SODA floating timestamps have no timezone; format accordingly.
     since = watermark.strftime("%Y-%m-%dT%H:%M:%S")
     logger.info("Pulling Montgomery County incidents with start_date > %s", since)
+    fields = select_fields(MOCO["source_name"], socrata_columns(session, MOCO["base_url"]))
 
     records: list[dict] = []
     offset = 0
     while True:
         page = request_json(session, MOCO["base_url"], params={
+            "$select": ",".join(fields),
             "$where": f"{MOCO['watermark_field']} > '{since}'",
             "$order": f"{MOCO['watermark_field']} ASC",
             "$limit": MOCO["page_size"],

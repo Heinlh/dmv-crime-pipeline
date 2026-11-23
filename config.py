@@ -4,15 +4,37 @@ All paths are relative to the project root so the pipeline runs the same
 locally and inside GitHub Actions.
 """
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
+# The raw parquet zone and the watermarks are the pipeline's only durable
+# state; everything downstream is rebuilt from them on every run. Locally
+# they default to data/raw and state/. In CI they live on the repo's
+# `data` branch, checked out as a worktree, and the workflow points these
+# two variables at it (see scripts/datastore.sh).
+RAW_DIR = Path(os.environ.get("DMV_RAW_DIR") or PROJECT_ROOT / "data" / "raw").resolve()
+STATE_PATH = Path(os.environ.get("DMV_STATE_PATH") or PROJECT_ROOT / "state" / "watermarks.json").resolve()
 WAREHOUSE_PATH = PROJECT_ROOT / "data" / "warehouse" / "crime.duckdb"
-STATE_PATH = PROJECT_ROOT / "state" / "watermarks.json"
 SITE_DATA_DIR = PROJECT_ROOT / "site" / "data"
+
+# Lineage column stamped on every landed row: when the pipeline fetched
+# that version of the record. ISO 8601 UTC, fixed width, so it sorts
+# chronologically as a string (the raw zone stores everything as text).
+EXTRACTED_AT = "_extracted_at"
+
+# Field allowlists. Each source's `fields` is the complete set of columns
+# the raw zone may hold for it: the extractors request only these (the
+# subset the live schema actually has), land_raw drops anything else, and
+# the loader pads any that a batch lacked. The raw zone is published on
+# the public `data` branch, so a field belongs here only if the transform
+# reads it or it identifies the record; anything more precise than the
+# block-level location, and anything about a person, stays out. Agencies
+# publish more than this (Montgomery: house numbers and geocoded street
+# addresses; PG County: street numbers; Fairfax: victim demographics and
+# officer IDs), and none of it is ever requested.
 
 # How far back to reach when there is no watermark yet (first run, or a
 # run whose data/state cache was lost). July 2016 is when the Montgomery
@@ -29,6 +51,16 @@ MOCO = {
     "base_url": "https://data.montgomerycountymd.gov/resource/icn6-v9z3.json",
     "watermark_field": "start_date",  # floating timestamp in SODA
     "page_size": 5000,
+    # `location` is the block address; the dataset's address_number,
+    # address_street and geolocation_* columns are finer than block level
+    # and are never requested. offence_code and nibrs_code identify which
+    # offense row of an incident a record is; `date` is the dispatch time.
+    "fields": [
+        "incident_id", "offence_code", "nibrs_code", "case_number",
+        "date", "start_date", "end_date", "crimename2", "crimename3",
+        "victims", "district", "location", "city", "zip_code",
+        "latitude", "longitude",
+    ],
 }
 
 # Prince George's County: Socrata SODA API on data.princegeorgescountymd.gov.
@@ -44,6 +76,21 @@ PGC = {
     "historical_cutoff": "2023-07-06T00:00:00",
     "watermark_field": "date",  # floating timestamp in SODA
     "page_size": 5000,
+    # Both live datasets share one schema. The county's street_address
+    # often carries the exact house number and its coordinates geocode
+    # that address, so street_address is fetched only so
+    # extractors/privacy.py can derive block_address from it, and is
+    # never landed; coordinates are rounded to block scale. The transform
+    # also coalesces across names older generations used (id, offense,
+    # inc_type, sector, city, zip_code), kept so a batch carrying them
+    # still lands.
+    "fields": [
+        "incident_case_id", "date", "clearance_code_inc_type",
+        "pgpd_sector", "pgpd_beat", "block_address",
+        "latitude", "longitude",
+        "id", "offense", "inc_type", "sector", "city", "zip_code",
+    ],
+    "fetch_only": ["street_address"],
 }
 
 # Fairfax County: FCPD's public "Crimes Against" feature services on the
@@ -54,8 +101,8 @@ PGC = {
 # with DateReported + ViolationCodeReference_Descript, Society rows are
 # event level with ReportDate + EventDescription/IBRDescription. The
 # extractor reads each layer's field list and requests only the names in
-# desired_fields that the layer actually has; the transform COALESCEs
-# across the variants. The services also publish victim demographics and
+# `fields` that the layer actually has; the transform COALESCEs across
+# the variants. The services also publish victim demographics and
 # officer identifiers; those are deliberately never requested.
 FAIRFAX = {
     "source_name": "fairfax",
@@ -68,10 +115,13 @@ FAIRFAX = {
     # first of these present on a layer becomes its watermark field
     "watermark_fields": ["DateReported", "ReportDate"],  # esri epoch-millis
     "page_size": 2000,  # service maxRecordCount is 2000
-    "desired_fields": [
+    # latitude/longitude are not layer fields: the extractor flattens them
+    # out of the point geometry
+    "fields": [
         "UniqueID", "DateReported", "ReportDate", "BeginDate", "IBRCode",
         "IBRDescription", "IncidentNumber", "ViolationCodeReference_Descript",
         "EventDescription", "Category", "Station", "PatrolArea", "DISTRICT",
+        "latitude", "longitude",
     ],
 }
 
@@ -91,10 +141,11 @@ PWC_VA = {
     "layer_id": 0,
     "watermark_field": "OccurredOn",  # esri epoch-millis timestamp
     "page_size": 2000,  # layer maxRecordCount is 2000
-    "out_fields": [
+    # latitude/longitude come from the geometry, as for Fairfax
+    "fields": [
         "InstanceID", "CaseNo", "OccurredOn", "OccurredBetween",
         "BlockAddress", "City", "State", "ZipCode",
-        "IBRCode", "CrimeCategory",
+        "IBRCode", "CrimeCategory", "latitude", "longitude",
     ],
 }
 
@@ -117,4 +168,19 @@ DC = {
     },
     "watermark_field": "REPORT_DAT",  # esri epoch-millis timestamp
     "page_size": 1000,  # layer MaxRecordCount is 1000
+    # BLOCK is already block-level, and LATITUDE/LONGITUDE are anonymized
+    # to the block by MPD
+    "fields": [
+        "CCN", "REPORT_DAT", "START_DATE", "END_DATE", "OFFENSE", "METHOD",
+        "BLOCK", "WARD", "LATITUDE", "LONGITUDE",
+    ],
 }
+
+# Every source, keyed by source_name: the registry the landing step,
+# loader and raw-zone migration use to look up a source's allowlist.
+SOURCES = {cfg["source_name"]: cfg for cfg in (MOCO, DC, PGC, FAIRFAX, PWC_VA)}
+
+
+def allowed_fields(source_name: str) -> list[str]:
+    """The raw-zone allowlist for a source, plus the lineage column."""
+    return [*SOURCES[source_name]["fields"], EXTRACTED_AT]

@@ -4,3 +4,4 @@ site/data/
 site/og/
 __pycache__/
 *.duckdb
+.datastore/

@@ -110,10 +110,12 @@ FROM deduped
 WHERE rn = 1 AND incident_id IS NOT NULL;
 
 -- -------------------------------------------- Prince George's County
--- Column names differ between the county's two dataset generations
--- (wb4e-w4nf vs xjru-idbe), so identifiers, offense text, and location
--- fields are coalesced across every candidate name; the loader pads any
--- candidate a batch omitted. Offense values are short uppercase phrases
+-- Identifiers, offense text, and area fields are coalesced across every
+-- column name the county has used; the loader pads any candidate a batch
+-- omitted. The address is block_address, which extractors/privacy.py
+-- derives at landing from the county's street_address (often an exact
+-- house address) by rounding the house number down to its block; the
+-- exact address is never landed. Offense values are short uppercase phrases
 -- like 'THEFT FROM AUTO', 'ASSAULT, WEAPON', 'B & E, RESIDENTIAL',
 -- mapped by the keyword rules below. The dataset also includes traffic
 -- ACCIDENT rows, which land in 'other' (published data stays published).
@@ -129,7 +131,7 @@ WITH normalized AS (
         COALESCE(incident_case_id, id)                  AS src_id,
         TRY_CAST("date" AS TIMESTAMP)                   AS occurred_ts,
         UPPER(COALESCE(clearance_code_inc_type, offense, inc_type)) AS off,
-        COALESCE(street_address, location, address)     AS addr,
+        block_address                                   AS addr,
         city, zip_code,
         COALESCE(pgpd_sector, sector, pgpd_beat)        AS area,
         NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,

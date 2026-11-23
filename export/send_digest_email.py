@@ -28,7 +28,7 @@ from datetime import date
 
 import requests
 
-from config import SITE_DATA_DIR
+import config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s digest-email: %(message)s")
 logger = logging.getLogger(__name__)
@@ -353,7 +353,7 @@ def run() -> int:
         logger.info("BUTTONDOWN_API_KEY not set; skipping email digest")
         return 0
 
-    digest_path = SITE_DATA_DIR / "digest.json"
+    digest_path = config.SITE_DATA_DIR / "digest.json"
     if not digest_path.exists():
         logger.warning("No digest.json found; nothing to send")
         return 0

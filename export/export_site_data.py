@@ -29,7 +29,7 @@ import h3
 
 from export import analysis
 
-from config import SITE_DATA_DIR, WAREHOUSE_PATH
+import config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s export: %(message)s")
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ CATEGORY_LABELS = {
 
 
 def _write_json(name: str, data) -> None:
-    path = SITE_DATA_DIR / name
+    path = config.SITE_DATA_DIR / name
     # separators (no indent) keeps the larger payloads as small as possible
     path.write_text(json.dumps(data, separators=(",", ":")))
     logger.info("Wrote %s (%.1f KB)", path, path.stat().st_size / 1024)
@@ -405,8 +405,8 @@ def _digest(con) -> dict:
 
 
 def run() -> None:
-    SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
+    config.SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(config.WAREHOUSE_PATH), read_only=True)
 
     _write_json("summary.json", _summary(con))
     _write_json("incidents.json", _incidents(con))

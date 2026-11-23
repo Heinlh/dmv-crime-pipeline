@@ -10,7 +10,7 @@ victim/offense level (a multi-victim incident repeats its
 IncidentNumber) keyed on DateReported, while Society rows are event
 level keyed on ReportDate with different offense-text columns. So the
 extractor first reads each layer's field list, requests only the
-configured desired_fields that layer actually has, and uses whichever
+allowlisted `fields` that layer actually has, and uses whichever
 configured watermark field the layer carries. The services also publish
 victim demographics and officer identifiers; those are deliberately
 never requested. Point geometry is requested: the county publishes it
@@ -28,7 +28,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from config import FAIRFAX
-from extractors.base import land_raw, make_session, read_watermark, request_json, write_watermark
+from extractors.base import (land_raw, make_session, read_watermark, request_json,
+                             select_fields, write_watermark)
 
 logger = logging.getLogger("fairfax")
 
@@ -60,7 +61,8 @@ def _query_service(session, service: str, since: datetime) -> tuple[list[dict], 
         logger.warning("Service %s has none of the watermark fields %s; skipping",
                        service, FAIRFAX["watermark_fields"])
         return [], None
-    out_fields = [f for f in FAIRFAX["desired_fields"] if f in fields]
+    # latitude/longitude are flattened from the geometry below
+    out_fields = select_fields(FAIRFAX["source_name"], fields, derived=("latitude", "longitude"))
 
     url = f"{FAIRFAX['base_url']}/{service}/FeatureServer/{layer_id}/query"
     since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
