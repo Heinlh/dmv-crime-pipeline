@@ -7,7 +7,8 @@ layer listing and builds the year -> layer id map from the layer names
 (falling back to the ids pinned in config if that request fails), then
 queries every year layer that falls inside the extraction window.
 Attributes already include block-level LATITUDE/LONGITUDE, so geometry
-is not requested.
+is not requested. Each layer's field list is read first and only the
+allowlisted fields it has are requested; see config DC["fields"].
 
 Incremental strategy: filter on REPORT_DAT (epoch milliseconds) greater
 than the stored watermark, page with resultOffset ordered by REPORT_DAT,
@@ -20,7 +21,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from config import DC
-from extractors.base import land_raw, make_session, read_watermark, request_json, write_watermark
+from extractors.base import (arcgis_fields, land_raw, make_session, read_watermark,
+                             request_json, select_fields, write_watermark)
 
 logger = logging.getLogger("dc")
 
@@ -54,6 +56,7 @@ def discover_year_layers(session) -> dict[int, int]:
 
 
 def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
+    fields = select_fields(DC["source_name"], arcgis_fields(session, f"{DC['base_url']}/{layer_id}"))
     url = f"{DC['base_url']}/{layer_id}/query"
     since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
     records: list[dict] = []
@@ -61,7 +64,7 @@ def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
     while True:
         payload = request_json(session, url, params={
             "where": f"{DC['watermark_field']} > TIMESTAMP '{since_sql}'",
-            "outFields": "*",
+            "outFields": ",".join(fields),
             "orderByFields": f"{DC['watermark_field']} ASC",
             "returnGeometry": "false",
             "resultOffset": offset,

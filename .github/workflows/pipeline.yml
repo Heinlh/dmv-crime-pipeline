@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write  # push the raw zone to the data branch
   pages: write
   id-token: write
 
@@ -17,10 +17,15 @@ concurrency:
 jobs:
   run-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # the full-history backfill (cold cache) takes a while
+    timeout-minutes: 90  # a full-history backfill (no data branch, no cache) takes a while
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # The pipeline's durable state, the raw parquet zone and the
+      # watermarks, lives on the repo's `data` branch, checked out below.
+      DMV_RAW_DIR: .datastore/raw
+      DMV_STATE_PATH: .datastore/state/watermarks.json
     steps:
       - uses: actions/checkout@v4
 
@@ -30,26 +35,50 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # data/ and state/ are gitignored, so the raw parquet zone and the
-      # per-source watermarks are carried between daily runs by the Actions
-      # cache instead. On a cache hit the extractors pull only the last day
-      # or so; on a miss (first run, or cache evicted) they re-backfill the
-      # full history from BACKFILL_START, which is slow but safe because
-      # every downstream step is idempotent.
-      - uses: actions/cache@v4
+      - name: Check out the data branch
+        id: datastore
+        run: scripts/datastore.sh open .datastore >> "$GITHUB_OUTPUT"
+
+      # One-time migration. Until the data branch existed, the raw zone
+      # lived only in the Actions cache. The first run that finds no data
+      # branch restores the newest cache and seeds the branch from it:
+      # fields cut to the allowlists, locations coarsened to block level,
+      # extraction times recovered from the file names. Every later run
+      # skips both steps, and the old cache entries age out on their own.
+      - name: Restore the legacy raw zone (one-time)
+        if: steps.datastore.outputs.exists == 'false'
+        uses: actions/cache/restore@v4
         with:
           path: |
             data/raw
             state
-          # v2: bumped to discard caches whose DC watermark advanced while
-          # layer discovery was broken (only 2025+ had been pulled)
-          key: pipeline-data-v2-${{ github.run_id }}
+          key: pipeline-data-v2-migrate
           restore-keys: pipeline-data-v2-
+
+      - name: Seed the data branch from it (one-time)
+        id: seed
+        if: steps.datastore.outputs.exists == 'false'
+        run: python -m scripts.migrate_raw_zone --src data/raw --state state/watermarks.json --dest .datastore
 
       - name: Run pipeline (extract, load, transform, export)
         env:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
         run: python run_pipeline.py
+
+      # Saved even when an extractor failed: what landed, and the
+      # watermarks of the sources that succeeded, are consistent with each
+      # other, and a failed source simply re-pulls next run. Never saved
+      # after a failed seeding, so a half-migrated branch is never pushed.
+      - name: Save the data branch
+        if: always() && steps.datastore.outcome == 'success' && steps.seed.outcome != 'failure'
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          cp scripts/data_branch_readme.md .datastore/README.md
+          scripts/datastore.sh save .datastore "data: run ${{ github.run_number }} (${{ github.run_id }})"
 
       # Optional daily digest email via Buttondown. A silent no-op until
       # the BUTTONDOWN_API_KEY repository secret exists, so the pipeline
@@ -61,13 +90,15 @@ jobs:
           SITE_URL: https://heinlh.github.io/dmv-crime-pipeline
         run: python -m export.send_digest_email
 
-      # Runs even if the pipeline step above reported extractor failures,
-      # so the site still deploys with whatever data landed.
+      # Deploys even if an extractor failed, so the site still updates
+      # with whatever landed, but only when the export actually produced
+      # site data: a run that never reached the export must not publish an
+      # empty site over yesterday's.
       - uses: actions/upload-pages-artifact@v3
-        if: always()
+        if: always() && hashFiles('site/data/summary.json') != ''
         with:
           path: site
 
       - id: deployment
-        if: always()
+        if: always() && hashFiles('site/data/summary.json') != ''
         uses: actions/deploy-pages@v4

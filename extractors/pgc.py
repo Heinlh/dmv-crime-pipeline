@@ -9,9 +9,11 @@ the date field past the stored watermark, page with $limit/$offset, and
 advance the watermark to the max date seen. The frozen historical
 dataset is only queried when the watermark predates its cutoff (i.e. on
 a backfill). Column names have shifted between the county's dataset
-generations, so the extractor logs the first record's fields on every
-run and the transform coalesces across candidate names; the raw zone
-lands whatever the API returns, untouched.
+generations, so each dataset's published columns are read first and only
+allowlisted ones are requested ($select); the transform coalesces across
+candidate names. The county's street_address is often an exact house
+address, so land_raw coarsens it to block_address and never lands it
+(extractors/privacy.py).
 """
 
 import logging
@@ -19,7 +21,8 @@ import os
 from datetime import datetime, timedelta
 
 from config import PGC
-from extractors.base import land_raw, make_session, read_watermark, request_json, write_watermark
+from extractors.base import (land_raw, make_session, read_watermark, request_json,
+                             select_fields, socrata_columns, write_watermark)
 
 logger = logging.getLogger("pgc")
 
@@ -27,10 +30,14 @@ OVERLAP_HOURS = 24
 
 
 def _pull(session, url: str, since: str) -> list[dict]:
+    # block_address is derived at landing from street_address
+    fields = select_fields(PGC["source_name"], socrata_columns(session, url),
+                           derived=("block_address",))
     records: list[dict] = []
     offset = 0
     while True:
         page = request_json(session, url, params={
+            "$select": ",".join(fields),
             "$where": f"{PGC['watermark_field']} > '{since}'",
             "$order": f"{PGC['watermark_field']} ASC",
             "$limit": PGC["page_size"],

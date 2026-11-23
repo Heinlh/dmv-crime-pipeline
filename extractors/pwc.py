@@ -19,7 +19,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from config import PWC_VA
-from extractors.base import land_raw, make_session, read_watermark, request_json, write_watermark
+from extractors.base import (arcgis_fields, land_raw, make_session, read_watermark,
+                             request_json, select_fields, write_watermark)
 
 logger = logging.getLogger("pwc")
 
@@ -35,13 +36,17 @@ def extract() -> list[dict]:
     since_sql = watermark.strftime("%Y-%m-%d %H:%M:%S")
     logger.info("Pulling Prince William incidents with OccurredOn > %s", since_sql)
 
-    url = f"{PWC_VA['base_url']}/{PWC_VA['layer_id']}/query"
+    layer_url = f"{PWC_VA['base_url']}/{PWC_VA['layer_id']}"
+    # latitude/longitude are flattened from the geometry below
+    fields = select_fields(PWC_VA["source_name"], arcgis_fields(session, layer_url),
+                           derived=("latitude", "longitude"))
+    url = f"{layer_url}/query"
     records: list[dict] = []
     offset = 0
     while True:
         payload = request_json(session, url, params={
             "where": f"{PWC_VA['watermark_field']} > TIMESTAMP '{since_sql}'",
-            "outFields": ",".join(PWC_VA["out_fields"]),
+            "outFields": ",".join(fields),
             "orderByFields": f"{PWC_VA['watermark_field']} ASC",
             "returnGeometry": "true",
             "outSR": "4326",
