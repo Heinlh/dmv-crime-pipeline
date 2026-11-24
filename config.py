@@ -46,11 +46,21 @@ BACKFILL_START = datetime(2016, 7, 1, tzinfo=timezone.utc)
 # Montgomery County: Socrata SODA API, dataset icn6-v9z3.
 # Set the SOCRATA_APP_TOKEN environment variable to raise rate limits
 # (free token from https://data.montgomerycountymd.gov/profile/edit/developer_settings).
+#
+# Incremental on Socrata's :updated_at system field, the time each row was
+# last published or modified, not on start_date. An occurrence-time
+# watermark never asks again for an offense once newer offenses have been
+# seen, so every report published late, and every correction, was missed:
+# in September 2026 the warehouse held 1,833 of the 3,629 rows the county
+# published. :updated_at changes per row (verified: hundreds a day, not a
+# bulk republish), so it catches both.
 MOCO = {
     "source_name": "moco",
     "base_url": "https://data.montgomerycountymd.gov/resource/icn6-v9z3.json",
-    "watermark_field": "start_date",  # floating timestamp in SODA
+    "change_field": ":updated_at",
     "page_size": 5000,
+    # one row per offense: an incident is every row sharing incident_id
+    "incident_key": ["incident_id"],
     # `location` is the block address; the dataset's address_number,
     # address_street and geolocation_* columns are finer than block level
     # and are never requested. offence_code and nibrs_code identify which
@@ -67,15 +77,21 @@ MOCO = {
 # The county split its crime data in two: wb4e-w4nf covers Feb 2017 to
 # 5 July 2023 (frozen), xjru-idbe covers July 2023 to present. The
 # current dataset is updated WEEKLY by the county, so PG County data is
-# always a few days behind the daily sources. The extractor only reads
-# the frozen dataset when the watermark predates its cutoff (backfill).
+# always a few days behind the daily sources.
+#
+# The county republishes the whole current dataset at once (every row
+# shares one :updated_at), so no per-row change field exists. Instead the
+# extractor reads the dataset's rowsUpdatedAt and, when it has moved,
+# re-pulls the whole current dataset (about 82,000 rows, under 20 pages);
+# only incidents that actually changed are landed. The frozen dataset is
+# read once, when the source has no state yet.
 PGC = {
     "source_name": "pgc",
     "base_url": "https://data.princegeorgescountymd.gov/resource/xjru-idbe.json",
     "historical_url": "https://data.princegeorgescountymd.gov/resource/wb4e-w4nf.json",
-    "historical_cutoff": "2023-07-06T00:00:00",
-    "watermark_field": "date",  # floating timestamp in SODA
     "page_size": 5000,
+    # several rows per case are common (one per incident type)
+    "incident_key": ["incident_case_id", "id"],
     # Both live datasets share one schema. The county's street_address
     # often carries the exact house number and its coordinates geocode
     # that address, so street_address is fetched only so
@@ -115,6 +131,18 @@ FAIRFAX = {
     # first of these present on a layer becomes its watermark field
     "watermark_fields": ["DateReported", "ReportDate"],  # esri epoch-millis
     "page_size": 2000,  # service maxRecordCount is 2000
+    # victim/offense level: an incident is every row sharing IncidentNumber
+    "incident_key": ["IncidentNumber"],
+    # An incident's rows come from up to three services that refresh
+    # independently, and the county regenerates UniqueID between pulls,
+    # so no single extraction ever holds a Fairfax incident whole (one
+    # day's pull can re-send only the Property row of an incident whose
+    # assault sits in the Person service). Fairfax therefore versions by
+    # row: every distinct row ever seen counts, UniqueID aside, and the
+    # transform takes the most severe. The other sources version by
+    # incident, the latest extraction being the incident's whole state.
+    "versioning": "rows",
+    "unstable_fields": ["UniqueID"],
     # latitude/longitude are not layer fields: the extractor flattens them
     # out of the point geometry
     "fields": [
@@ -132,15 +160,22 @@ FAIRFAX = {
 # 100 block by the county, and sexual offense records are withheld by
 # the county for victim privacy (so this jurisdiction structurally
 # undercounts the 'sexual' category; the About page says so). The layer
-# stores state-plane geometry, so queries request outSR=4326. Reports
-# can be filed days after the offense and the layer has no report-date
-# column, so the extractor re-pulls a deep overlap window each run.
+# stores state-plane geometry, so queries request outSR=4326.
+#
+# The layer has no report-date column and no per-row edit tracking, only a
+# layer-wide editingInfo.dataLastEditDate. An occurrence-time watermark
+# with a 7 day overlap, paged on a non-unique sort, held 1,692 of the 3,203
+# rows the county published for October 2026. So when dataLastEditDate
+# moves, the extractor re-pulls the whole layer (its 3-year window fits in
+# a handful of pages) and lands only incidents that changed. Records that
+# have rolled out of the county's window stay on the data branch.
 PWC_VA = {
     "source_name": "pwc",
     "base_url": "https://services2.arcgis.com/0Q7l03Ls62VG0fy4/arcgis/rest/services/Public_Crime_Reports/FeatureServer",
     "layer_id": 0,
-    "watermark_field": "OccurredOn",  # esri epoch-millis timestamp
-    "page_size": 2000,  # layer maxRecordCount is 2000
+    "page_size": 8000,  # layer maxRecordCount is 16000
+    # one row per offense; CaseNo groups them, InstanceID when it is blank
+    "incident_key": ["CaseNo", "InstanceID"],
     # latitude/longitude come from the geometry, as for Fairfax
     "fields": [
         "InstanceID", "CaseNo", "OccurredOn", "OccurredBetween",
@@ -168,6 +203,7 @@ DC = {
     },
     "watermark_field": "REPORT_DAT",  # esri epoch-millis timestamp
     "page_size": 1000,  # layer MaxRecordCount is 1000
+    "incident_key": ["CCN"],
     # BLOCK is already block-level, and LATITUDE/LONGITUDE are anonymized
     # to the block by MPD
     "fields": [

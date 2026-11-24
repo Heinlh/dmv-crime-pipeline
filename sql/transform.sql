@@ -1,10 +1,24 @@
 -- =====================================================================
 -- Transform: raw source tables -> marts.fct_incidents
 -- =====================================================================
--- Idempotent by design: dedupe on the source id (keep the most recent
--- version of each incident), then INSERT OR REPLACE on incident_key.
--- Re-running the pipeline, overlap windows, and agency corrections all
--- resolve to the latest version of each record.
+-- Idempotent by design: the warehouse is rebuilt from the raw zone on
+-- every run, and INSERT OR REPLACE on incident_key keeps re-runs safe.
+--
+-- Every block resolves each incident the same way, in three steps:
+--   latest   keep only the rows of the incident's most recent extraction
+--            (_extracted_at). land_changed lands an incident complete
+--            whenever any of its rows changes, so that extraction is the
+--            incident's whole current state: agency corrections win, and
+--            an offense row the agency removed drops out.
+--   scored   compute each row's severity before choosing among them.
+--   deduped  one row per incident: the most severe offense, then the
+--            latest report, then a hash of every column the output reads,
+--            so the choice is fully deterministic. Rows that still tie
+--            produce identical output.
+-- Fairfax is the one exception to the latest step, explained in its block.
+-- Ordering on occurrence or report time alone, as before, left versions
+-- that shared those times, and the several offense rows one incident
+-- can carry, to an arbitrary pick that could change between runs.
 --
 -- Montgomery County category mapping uses keyword rules over the NIBRS
 -- category in crimename2 because NIBRS has dozens of values; the rules
@@ -20,17 +34,59 @@ INSERT OR REPLACE INTO marts.fct_incidents (
     block_address, city, zip_code, area_name,
     latitude, longitude, victims, method
 )
-WITH deduped AS (
+WITH latest AS (
+    SELECT * FROM (SELECT *, NULLIF(TRIM(incident_id), '') AS src_id FROM raw.moco_incidents)
+    WHERE src_id IS NOT NULL
+    QUALIFY _extracted_at = MAX(_extracted_at) OVER (PARTITION BY src_id)
+),
+scored AS (
+    SELECT *,
+        CASE
+            WHEN UPPER(crimename2) LIKE '%HOMICIDE%'
+              OR UPPER(crimename2) LIKE '%MURDER%'
+              OR UPPER(crimename2) LIKE '%MANSLAUGHTER%'    THEN 10
+            WHEN UPPER(crimename2) LIKE '%RAPE%'
+              OR UPPER(crimename2) LIKE '%SEX%'
+              OR UPPER(crimename2) LIKE '%SODOMY%'
+              OR UPPER(crimename2) LIKE '%FONDLING%'        THEN 9
+            WHEN UPPER(crimename2) LIKE '%AGGRAVATED ASSAULT%' THEN 8
+            WHEN UPPER(crimename2) LIKE '%ROBBERY%'
+              OR UPPER(crimename2) LIKE '%CARJACK%'         THEN 7
+            WHEN UPPER(crimename2) LIKE '%ARSON%'           THEN 6
+            WHEN UPPER(crimename2) LIKE '%ASSAULT%'
+              OR UPPER(crimename2) LIKE '%KIDNAP%'
+              OR UPPER(crimename2) LIKE '%BURGLARY%'        THEN 5
+            WHEN UPPER(crimename2) LIKE '%MOTOR VEHICLE THEFT%'
+              OR UPPER(crimename2) LIKE '%WEAPON%'          THEN 4
+            WHEN UPPER(crimename2) LIKE '%THEFT%'
+              OR UPPER(crimename2) LIKE '%LARCENY%'
+              OR UPPER(crimename2) LIKE '%FROM MOTOR VEHICLE%' THEN 3
+            WHEN UPPER(crimename2) LIKE '%DRUG%'
+              OR UPPER(crimename2) LIKE '%NARCOTIC%'
+              OR UPPER(crimename2) LIKE '%DUI%'
+              OR UPPER(crimename2) LIKE '%LIQUOR%'
+              OR UPPER(crimename2) LIKE '%DISORDERLY%'      THEN 2
+            ELSE 1
+        END AS sev
+    FROM latest
+),
+deduped AS (
     SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY incident_id
-        ORDER BY TRY_CAST(start_date AS TIMESTAMP) DESC NULLS LAST
+        PARTITION BY src_id
+        ORDER BY sev DESC, TRY_CAST(start_date AS TIMESTAMP) DESC NULLS LAST,
+                 md5(concat_ws(chr(31), COALESCE(crimename2, chr(0)), COALESCE(crimename3, chr(0)),
+                     COALESCE(offence_code, chr(0)), COALESCE(case_number, chr(0)),
+                     COALESCE(start_date, chr(0)), COALESCE(end_date, chr(0)),
+                     COALESCE(location, chr(0)), COALESCE(city, chr(0)), COALESCE(zip_code, chr(0)),
+                     COALESCE(district, chr(0)), COALESCE(latitude, chr(0)),
+                     COALESCE(longitude, chr(0)), COALESCE(victims, chr(0))))
     ) AS rn
-    FROM raw.moco_incidents
+    FROM scored
 )
 SELECT
-    'moco-' || incident_id                              AS incident_key,
+    'moco-' || src_id                                   AS incident_key,
     'moco'                                              AS jurisdiction,
-    incident_id                                         AS source_incident_id,
+    src_id                                              AS source_incident_id,
     case_number,
     TRY_CAST(start_date AS TIMESTAMP)                   AS occurred_at,
     TRY_CAST(end_date AS TIMESTAMP)                     AS occurred_end_at,
@@ -71,33 +127,7 @@ SELECT
           OR UPPER(crimename2) LIKE '%GAMBLING%'        THEN 'disorder'
         ELSE 'other'
     END                                                 AS offense_category,
-    CASE
-        WHEN UPPER(crimename2) LIKE '%HOMICIDE%'
-          OR UPPER(crimename2) LIKE '%MURDER%'
-          OR UPPER(crimename2) LIKE '%MANSLAUGHTER%'    THEN 10
-        WHEN UPPER(crimename2) LIKE '%RAPE%'
-          OR UPPER(crimename2) LIKE '%SEX%'
-          OR UPPER(crimename2) LIKE '%SODOMY%'
-          OR UPPER(crimename2) LIKE '%FONDLING%'        THEN 9
-        WHEN UPPER(crimename2) LIKE '%AGGRAVATED ASSAULT%' THEN 8
-        WHEN UPPER(crimename2) LIKE '%ROBBERY%'
-          OR UPPER(crimename2) LIKE '%CARJACK%'         THEN 7
-        WHEN UPPER(crimename2) LIKE '%ARSON%'           THEN 6
-        WHEN UPPER(crimename2) LIKE '%ASSAULT%'
-          OR UPPER(crimename2) LIKE '%KIDNAP%'
-          OR UPPER(crimename2) LIKE '%BURGLARY%'        THEN 5
-        WHEN UPPER(crimename2) LIKE '%MOTOR VEHICLE THEFT%'
-          OR UPPER(crimename2) LIKE '%WEAPON%'          THEN 4
-        WHEN UPPER(crimename2) LIKE '%THEFT%'
-          OR UPPER(crimename2) LIKE '%LARCENY%'
-          OR UPPER(crimename2) LIKE '%FROM MOTOR VEHICLE%' THEN 3
-        WHEN UPPER(crimename2) LIKE '%DRUG%'
-          OR UPPER(crimename2) LIKE '%NARCOTIC%'
-          OR UPPER(crimename2) LIKE '%DUI%'
-          OR UPPER(crimename2) LIKE '%LIQUOR%'
-          OR UPPER(crimename2) LIKE '%DISORDERLY%'      THEN 2
-        ELSE 1
-    END                                                 AS severity_weight,
+    sev                                                 AS severity_weight,
     location                                            AS block_address,
     city,
     zip_code,
@@ -107,7 +137,7 @@ SELECT
     TRY_CAST(TRY_CAST(victims AS DOUBLE) AS INTEGER)    AS victims,
     NULL                                                AS method
 FROM deduped
-WHERE rn = 1 AND incident_id IS NOT NULL;
+WHERE rn = 1;
 
 -- -------------------------------------------- Prince George's County
 -- Identifiers, offense text, and area fields are coalesced across every
@@ -126,9 +156,16 @@ INSERT OR REPLACE INTO marts.fct_incidents (
     block_address, city, zip_code, area_name,
     latitude, longitude, victims, method
 )
-WITH normalized AS (
+WITH latest AS (
+    SELECT * FROM (
+        SELECT *, COALESCE(NULLIF(TRIM(incident_case_id), ''), NULLIF(TRIM(id), '')) AS key_id
+        FROM raw.pgc_incidents)
+    WHERE key_id IS NOT NULL
+    QUALIFY _extracted_at = MAX(_extracted_at) OVER (PARTITION BY key_id)
+),
+normalized AS (
     SELECT
-        COALESCE(incident_case_id, id)                  AS src_id,
+        key_id                                          AS src_id,
         TRY_CAST("date" AS TIMESTAMP)                   AS occurred_ts,
         UPPER(COALESCE(clearance_code_inc_type, offense, inc_type)) AS off,
         block_address                                   AS addr,
@@ -136,13 +173,36 @@ WITH normalized AS (
         COALESCE(pgpd_sector, sector, pgpd_beat)        AS area,
         NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,
         NULLIF(TRY_CAST(longitude AS DOUBLE), 0)        AS lon
-    FROM raw.pgc_incidents
+    FROM latest
+),
+scored AS (
+    SELECT *,
+        CASE
+            WHEN off LIKE '%HOMICIDE%' OR off LIKE '%MURDER%' THEN 10
+            WHEN off LIKE '%SEX%' OR off LIKE '%RAPE%'        THEN 9
+            WHEN off LIKE '%SHOOTING%'                        THEN 8
+            WHEN off LIKE '%ROBBERY%' OR off LIKE '%CARJACK%' THEN 7
+            WHEN off LIKE '%ARSON%'                           THEN 6
+            WHEN off LIKE '%ASSAULT%' OR off LIKE '%B & E%'
+              OR off LIKE '%BURGLARY%' OR off LIKE '%BREAKING%' THEN 5
+            WHEN off LIKE '%AUTO, STOLEN%' OR off LIKE '%STOLEN VEHICLE%'
+              OR off LIKE '%WEAPON%'                          THEN 4
+            WHEN off LIKE '%THEFT%' OR off LIKE '%LARCENY%'   THEN 3
+            WHEN off LIKE '%DRUG%' OR off LIKE '%NARCOT%'
+              OR off LIKE '%DUI%'                             THEN 2
+            ELSE 1
+        END AS sev
+    FROM normalized
 ),
 deduped AS (
     SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY src_id ORDER BY occurred_ts DESC NULLS LAST
+        PARTITION BY src_id
+        ORDER BY sev DESC, occurred_ts DESC NULLS LAST,
+                 md5(concat_ws(chr(31), COALESCE(off, chr(0)), COALESCE(addr, chr(0)),
+                     COALESCE(area, chr(0)), COALESCE(city, chr(0)), COALESCE(zip_code, chr(0)),
+                     COALESCE(CAST(lat AS VARCHAR), chr(0)), COALESCE(CAST(lon AS VARCHAR), chr(0))))
     ) AS rn
-    FROM normalized
+    FROM scored
 )
 SELECT
     'pgc-' || src_id                                    AS incident_key,
@@ -179,21 +239,7 @@ SELECT
           OR off LIKE '%DISORDER%'                        THEN 'disorder'
         ELSE 'other'
     END                                                 AS offense_category,
-    CASE
-        WHEN off LIKE '%HOMICIDE%' OR off LIKE '%MURDER%' THEN 10
-        WHEN off LIKE '%SEX%' OR off LIKE '%RAPE%'        THEN 9
-        WHEN off LIKE '%SHOOTING%'                        THEN 8
-        WHEN off LIKE '%ROBBERY%' OR off LIKE '%CARJACK%' THEN 7
-        WHEN off LIKE '%ARSON%'                           THEN 6
-        WHEN off LIKE '%ASSAULT%' OR off LIKE '%B & E%'
-          OR off LIKE '%BURGLARY%' OR off LIKE '%BREAKING%' THEN 5
-        WHEN off LIKE '%AUTO, STOLEN%' OR off LIKE '%STOLEN VEHICLE%'
-          OR off LIKE '%WEAPON%'                          THEN 4
-        WHEN off LIKE '%THEFT%' OR off LIKE '%LARCENY%'   THEN 3
-        WHEN off LIKE '%DRUG%' OR off LIKE '%NARCOT%'
-          OR off LIKE '%DUI%'                             THEN 2
-        ELSE 1
-    END                                                 AS severity_weight,
+    sev                                                 AS severity_weight,
     addr                                                AS block_address,
     city,
     zip_code,
@@ -214,6 +260,10 @@ WHERE rn = 1 AND src_id IS NOT NULL;
 -- incident-level semantics of the other jurisdictions. Category is FCPD's
 -- own NIBRS-group label ('Aggravated Assault', 'Larceny'); the longer
 -- ViolationCodeReference_Descript is kept as the raw offense text.
+-- Unlike the other blocks, Fairfax does not keep only the latest
+-- extraction: an incident's rows come from three services that refresh
+-- independently, so no single extraction holds it whole (see config
+-- FAIRFAX "versioning"). Every distinct row ever seen counts.
 INSERT OR REPLACE INTO marts.fct_incidents (
     incident_key, jurisdiction, source_incident_id, case_number,
     occurred_at, occurred_end_at, reported_at,
@@ -221,9 +271,13 @@ INSERT OR REPLACE INTO marts.fct_incidents (
     block_address, city, zip_code, area_name,
     latitude, longitude, victims, method
 )
-WITH normalized AS (
+WITH keyed AS (
+    SELECT * FROM (SELECT *, NULLIF(TRIM(IncidentNumber), '') AS key_id FROM raw.fairfax_incidents)
+    WHERE key_id IS NOT NULL
+),
+normalized AS (
     SELECT
-        TRIM(IncidentNumber)                            AS src_id,
+        key_id                                          AS src_id,
         epoch_ms(TRY_CAST(BeginDate AS BIGINT))         AS occurred_ts,
         epoch_ms(TRY_CAST(COALESCE(DateReported, ReportDate) AS BIGINT)) AS reported_ts,
         UPPER(TRIM(COALESCE(ViolationCodeReference_Descript,
@@ -231,7 +285,7 @@ WITH normalized AS (
         DISTRICT                                        AS district,
         NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,
         NULLIF(TRY_CAST(longitude AS DOUBLE), 0)        AS lon
-    FROM raw.fairfax_incidents
+    FROM keyed
 ),
 scored AS (
     SELECT *,
@@ -261,7 +315,10 @@ scored AS (
 deduped AS (
     SELECT *, ROW_NUMBER() OVER (
         PARTITION BY src_id
-        ORDER BY sev DESC, reported_ts DESC NULLS LAST
+        ORDER BY sev DESC, reported_ts DESC NULLS LAST,
+                 md5(concat_ws(chr(31), COALESCE(off, chr(0)), COALESCE(district, chr(0)),
+                     COALESCE(CAST(occurred_ts AS VARCHAR), chr(0)),
+                     COALESCE(CAST(lat AS VARCHAR), chr(0)), COALESCE(CAST(lon AS VARCHAR), chr(0))))
     ) AS rn
     FROM scored
 )
@@ -307,7 +364,7 @@ SELECT
     NULL                                                AS victims,
     NULL                                                AS method
 FROM deduped
-WHERE rn = 1 AND src_id IS NOT NULL AND src_id <> '';
+WHERE rn = 1;
 
 -- -------------------------------------------- Prince William County
 -- PWC publishes NIBRS offense text in IBRCode (alias "Crime Type",
@@ -323,9 +380,16 @@ INSERT OR REPLACE INTO marts.fct_incidents (
     block_address, city, zip_code, area_name,
     latitude, longitude, victims, method
 )
-WITH normalized AS (
+WITH latest AS (
+    SELECT * FROM (
+        SELECT *, COALESCE(NULLIF(TRIM(CaseNo), ''), NULLIF(TRIM(InstanceID), '')) AS key_id
+        FROM raw.pwc_incidents)
+    WHERE key_id IS NOT NULL
+    QUALIFY _extracted_at = MAX(_extracted_at) OVER (PARTITION BY key_id)
+),
+normalized AS (
     SELECT
-        COALESCE(TRIM(CaseNo), InstanceID)              AS src_id,
+        key_id                                          AS src_id,
         epoch_ms(TRY_CAST(OccurredOn AS BIGINT))        AS occurred_ts,
         epoch_ms(TRY_CAST(OccurredBetween AS BIGINT))   AS occurred_end_ts,
         UPPER(TRIM(COALESCE(IBRCode, CrimeCategory)))   AS off,
@@ -334,7 +398,7 @@ WITH normalized AS (
         ZipCode                                         AS zip,
         NULLIF(TRY_CAST(latitude  AS DOUBLE), 0)        AS lat,
         NULLIF(TRY_CAST(longitude AS DOUBLE), 0)        AS lon
-    FROM raw.pwc_incidents
+    FROM latest
 ),
 scored AS (
     SELECT *,
@@ -364,7 +428,11 @@ scored AS (
 deduped AS (
     SELECT *, ROW_NUMBER() OVER (
         PARTITION BY src_id
-        ORDER BY sev DESC, occurred_ts DESC NULLS LAST
+        ORDER BY sev DESC, occurred_ts DESC NULLS LAST,
+                 md5(concat_ws(chr(31), COALESCE(off, chr(0)), COALESCE(addr, chr(0)),
+                     COALESCE(city, chr(0)), COALESCE(zip, chr(0)),
+                     COALESCE(CAST(occurred_end_ts AS VARCHAR), chr(0)),
+                     COALESCE(CAST(lat AS VARCHAR), chr(0)), COALESCE(CAST(lon AS VARCHAR), chr(0))))
     ) AS rn
     FROM scored
 )
@@ -408,7 +476,7 @@ SELECT
     NULL                                                AS victims,
     NULL                                                AS method
 FROM deduped
-WHERE rn = 1 AND src_id IS NOT NULL AND src_id <> '';
+WHERE rn = 1;
 
 -- ----------------------------------------------------------------- DC
 INSERT OR REPLACE INTO marts.fct_incidents (
@@ -418,24 +486,41 @@ INSERT OR REPLACE INTO marts.fct_incidents (
     block_address, city, zip_code, area_name,
     latitude, longitude, victims, method
 )
-WITH deduped AS (
+WITH latest AS (
+    SELECT * FROM (SELECT *, NULLIF(TRIM(CCN), '') AS src_id FROM raw.dc_incidents)
+    WHERE src_id IS NOT NULL
+    QUALIFY _extracted_at = MAX(_extracted_at) OVER (PARTITION BY src_id)
+),
+scored AS (
+    SELECT l.*,
+           COALESCE(m.unified_category, 'other') AS category,
+           COALESCE(m.severity_weight, 1)        AS sev
+    FROM latest l
+    LEFT JOIN marts.dim_offense_map m
+           ON m.jurisdiction = 'dc' AND m.source_offense = l.OFFENSE
+),
+deduped AS (
     SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY CCN
-        ORDER BY TRY_CAST(REPORT_DAT AS BIGINT) DESC NULLS LAST
+        PARTITION BY src_id
+        ORDER BY sev DESC, TRY_CAST(REPORT_DAT AS BIGINT) DESC NULLS LAST,
+                 md5(concat_ws(chr(31), COALESCE(OFFENSE, chr(0)), COALESCE(METHOD, chr(0)),
+                     COALESCE(BLOCK, chr(0)), COALESCE(WARD, chr(0)),
+                     COALESCE(START_DATE, chr(0)), COALESCE(END_DATE, chr(0)),
+                     COALESCE(LATITUDE, chr(0)), COALESCE(LONGITUDE, chr(0))))
     ) AS rn
-    FROM raw.dc_incidents
+    FROM scored
 )
 SELECT
-    'dc-' || CCN                                        AS incident_key,
+    'dc-' || src_id                                     AS incident_key,
     'dc'                                                AS jurisdiction,
-    CCN                                                 AS source_incident_id,
-    CCN                                                 AS case_number,
+    src_id                                              AS source_incident_id,
+    src_id                                              AS case_number,
     epoch_ms(TRY_CAST(START_DATE AS BIGINT))            AS occurred_at,
     epoch_ms(TRY_CAST(END_DATE AS BIGINT))              AS occurred_end_at,
     epoch_ms(TRY_CAST(REPORT_DAT AS BIGINT))            AS reported_at,
     d.OFFENSE                                           AS offense_raw,
-    COALESCE(m.unified_category, 'other')               AS offense_category,
-    COALESCE(m.severity_weight, 1)                      AS severity_weight,
+    category                                            AS offense_category,
+    sev                                                 AS severity_weight,
     d.BLOCK                                             AS block_address,
     'WASHINGTON'                                        AS city,
     NULL                                                AS zip_code,
@@ -445,6 +530,4 @@ SELECT
     NULL                                                AS victims,
     d.METHOD                                            AS method
 FROM deduped d
-LEFT JOIN marts.dim_offense_map m
-       ON m.jurisdiction = 'dc' AND m.source_offense = d.OFFENSE
-WHERE d.rn = 1 AND d.CCN IS NOT NULL;
+WHERE d.rn = 1;

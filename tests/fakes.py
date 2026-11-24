@@ -4,11 +4,13 @@ FakeAgencies answers the requests the real extractors make, so the
 integration and end-to-end tests run every extractor unmodified, through
 request_json, with no network:
 
-  Socrata  /api/views/{id}.json             column metadata
-           /resource/{id}.json              $select, $where f > 'ts', $order, paging
+  Socrata  /api/views/{id}.json             columns, rowsUpdatedAt
+           /resource/{id}.json              $select (incl. :id, :updated_at),
+                                            $where f > 'ts' | f in (...), $order, paging
   ArcGIS   .../FeatureServer?f=json         layer listing
-           .../FeatureServer/{id}?f=json    field list
-           .../FeatureServer/{id}/query     where f > TIMESTAMP 'ts', outFields, paging
+           .../FeatureServer/{id}?f=json    fields, objectIdField, editingInfo
+           .../FeatureServer/{id}/query     where f > TIMESTAMP 'ts' | 1=1,
+                                            outFields, orderByFields, paging
 
 Each dataset publishes more fields than the pipeline's allowlist,
 mirroring what the real agencies publish (house numbers, exact street
@@ -17,6 +19,7 @@ are never requested and never landed. Every request is recorded in
 `calls`.
 """
 
+import random
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -34,8 +37,9 @@ UNLISTED = {
     "pwc": {"Disposition", "ReportingOfficer"},
 }
 
-_SOCRATA_WHERE = re.compile(r"^(\w+) > '([^']+)'$")
-_ARCGIS_WHERE = re.compile(r"^(\w+) > TIMESTAMP '([^']+)'$")
+_GREATER = re.compile(r"^(\S+) > (?:TIMESTAMP )?'([^']+)'$")
+_IN_LIST = re.compile(r"^(\w+) in \((.*)\)$", re.S)
+SOCRATA_SYSTEM = {":id", ":updated_at", ":created_at"}
 
 
 def iso(moment: datetime) -> str:
@@ -48,23 +52,83 @@ def epoch_ms(moment: datetime) -> int:
     return int(moment.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
+def _naive(text: str) -> datetime:
+    return datetime.fromisoformat(text).replace(tzinfo=None)
+
+
 class FakeAgencies:
+    """Datasets are kept as lists of rows. Socrata rows carry the system
+    fields :id and :updated_at; ArcGIS features carry an object id. Writes
+    through publish() advance a fake clock, bumping :updated_at, the
+    dataset's rowsUpdatedAt, or the layer's dataLastEditDate, just as the
+    real services do.
+
+    Paging reproduces the real failure: when a query's sort is not unique,
+    tied rows come back in a different order on every request, so offset
+    paging over them duplicates some rows and drops others. A sort ending
+    in :id or the object id is total, and immune."""
+
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
-        self.socrata: dict[str, dict] = {}   # resource url -> {columns, records, ts}
-        self.arcgis: dict[str, dict] = {}    # layer url -> {fields, features}
+        self.socrata: dict[str, dict] = {}   # resource url -> dataset
+        self.arcgis: dict[str, dict] = {}    # layer url -> layer
         self.servers: dict[str, list] = {}   # FeatureServer url -> layer listing
+        self.clock = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        self._next_id = 1
+
+    def _tick(self) -> datetime:
+        self.clock += timedelta(seconds=1)
+        return self.clock
 
     # --------------------------------------------------------- registry
 
     def add_socrata(self, resource_url: str, columns: list[str], records: list[dict]):
-        self.socrata[resource_url] = {"columns": columns, "records": records}
+        self.socrata[resource_url] = {"columns": columns, "records": [], "rows_updated_at": None}
+        for record in records:
+            self.publish(resource_url, record)
 
     def add_arcgis_layer(self, server_url: str, layer_id: int, name: str,
-                         fields: list[str], features: list[dict]):
+                         fields: list[str], features: list[dict], object_id: str = "OBJECTID"):
         """features: [{"attributes": {...}, "geometry": {"x":..., "y":...} | None}]"""
         self.servers.setdefault(server_url, []).append({"id": layer_id, "name": name})
-        self.arcgis[f"{server_url}/{layer_id}"] = {"fields": fields, "features": features}
+        url = f"{server_url}/{layer_id}"
+        self.arcgis[url] = {"fields": [*fields, *([object_id] if object_id not in fields else [])],
+                            "object_id": object_id, "features": [], "edited": None}
+        for feature in features:
+            self.publish(url, feature)
+
+    def publish(self, url: str, row: dict, replace=None):
+        """Add a row to a dataset or layer, or, with `replace` (a predicate
+        over existing rows), replace the first match in place, keeping its
+        id. Advances :updated_at / rowsUpdatedAt / dataLastEditDate."""
+        moment = self._tick()
+        if url in self.socrata:
+            dataset = self.socrata[url]
+            row = dict(row)
+            rows = dataset["records"]
+            match = next((i for i, r in enumerate(rows) if replace and replace(r)), None)
+            row[":id"] = rows[match][":id"] if match is not None else f"row-{self._next_id:06d}"
+            row[":updated_at"] = moment.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            if match is None:
+                self._next_id += 1
+                rows.append(row)
+            else:
+                rows[match] = row
+            dataset["rows_updated_at"] = int(moment.timestamp())
+        else:
+            layer = self.arcgis[url]
+            feature = {"attributes": dict(row["attributes"]), "geometry": row.get("geometry")}
+            feats = layer["features"]
+            match = next((i for i, f in enumerate(feats) if replace and replace(f["attributes"])), None)
+            oid = layer["object_id"]
+            if match is not None:
+                feature["attributes"][oid] = feats[match]["attributes"][oid]
+                feats[match] = feature
+            else:
+                feature["attributes"].setdefault(oid, self._next_id)
+                self._next_id += 1
+                feats.append(feature)
+            layer["edited"] = int(moment.timestamp() * 1000)
 
     # --------------------------------------------------------- dispatch
 
@@ -72,8 +136,9 @@ class FakeAgencies:
         params = dict(params or {})
         self.calls.append((url, params))
         if "/api/views/" in url:
-            resource = url.replace("/api/views/", "/resource/")
-            return {"columns": [{"fieldName": c} for c in self.socrata[resource]["columns"]]}
+            dataset = self.socrata[url.replace("/api/views/", "/resource/")]
+            return {"columns": [{"fieldName": c} for c in dataset["columns"]],
+                    "rowsUpdatedAt": dataset["rows_updated_at"]}
         if "/resource/" in url:
             return self._socrata_query(self.socrata[url], params)
         if url.endswith("/query"):
@@ -81,20 +146,42 @@ class FakeAgencies:
         if url in self.servers:
             return {"layers": self.servers[url]}
         if url in self.arcgis:
-            return {"fields": [{"name": f} for f in self.arcgis[url]["fields"]]}
+            layer = self.arcgis[url]
+            return {"fields": [{"name": f, "type": "esriFieldTypeOID" if f == layer["object_id"]
+                                else "esriFieldTypeString"} for f in layer["fields"]],
+                    "objectIdField": layer["object_id"],
+                    "editingInfo": {"dataLastEditDate": layer["edited"]}}
         raise AssertionError(f"unexpected request: {url} {params}")
+
+    def _ordered(self, rows, order: str, get):
+        """Sort rows on `order` ("a ASC, b DESC"). Rows are shuffled with a
+        per-request seed first and the sort is stable, so ties the sort
+        leaves come back in a different order on each request, as a real
+        server may; a sort ending in a unique id is total and immune."""
+        rows = list(rows)
+        random.Random(len(self.calls)).shuffle(rows)
+        for name, *direction in reversed([part.split() for part in order.split(",") if part.strip()]):
+            rows.sort(key=lambda r: (get(r, name) is None, get(r, name) or 0),
+                      reverse=bool(direction) and direction[0].upper() == "DESC")
+        return rows
 
     def _socrata_query(self, dataset, params):
         select = params["$select"].split(",")
-        unknown = set(select) - set(dataset["columns"])
+        unknown = set(select) - set(dataset["columns"]) - SOCRATA_SYSTEM
         assert not unknown, f"$select names columns the dataset lacks: {unknown}"
         rows = dataset["records"]
-        match = _SOCRATA_WHERE.match(params.get("$where", ""))
-        if match:
+        where = params.get("$where", "")
+        if match := _GREATER.match(where):
             field, since = match.groups()
-            cut = datetime.fromisoformat(since)
-            rows = [r for r in rows if r.get(field) and datetime.fromisoformat(r[field]) > cut]
-            rows = sorted(rows, key=lambda r: r[field])
+            cut = _naive(since)
+            rows = [r for r in rows if r.get(field) and _naive(r[field]) > cut]
+        elif match := _IN_LIST.match(where):
+            field, body = match.groups()
+            wanted = {v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", body)}
+            rows = [r for r in rows if r.get(field) in wanted]
+        elif where:
+            raise AssertionError(f"fake cannot evaluate $where: {where}")
+        rows = self._ordered(rows, params.get("$order", ""), lambda r, n: r.get(n))
         offset, limit = int(params.get("$offset", 0)), int(params.get("$limit", 1000))
         # Socrata omits null fields from each returned record
         return [{f: r[f] for f in select if r.get(f) is not None} for r in rows[offset:offset + limit]]
@@ -104,12 +191,15 @@ class FakeAgencies:
         unknown = set(out_fields) - set(layer["fields"])
         assert not unknown, f"outFields names fields the layer lacks: {unknown}"
         features = layer["features"]
-        match = _ARCGIS_WHERE.match(params.get("where", ""))
-        if match:
+        where = params.get("where", "")
+        if match := _GREATER.match(where):
             field, since = match.groups()
             cut = epoch_ms(datetime.strptime(since, "%Y-%m-%d %H:%M:%S"))
             features = [f for f in features if (f["attributes"].get(field) or 0) > cut]
-            features = sorted(features, key=lambda f: f["attributes"][field])
+        elif where not in ("", "1=1"):
+            raise AssertionError(f"fake cannot evaluate where: {where}")
+        features = self._ordered(features, params.get("orderByFields", ""),
+                                 lambda f, n: f["attributes"].get(n))
         offset = int(params.get("resultOffset", 0))
         count = int(params.get("resultRecordCount", 1000))
         page = features[offset:offset + count]
@@ -123,12 +213,14 @@ class FakeAgencies:
     # --------------------------------------------------------- inspection
 
     def requested_fields(self) -> dict[str, set]:
-        """Every field name any query asked for, by source."""
+        """Every field name any query asked for, by source (system and
+        object-id fields used only for paging are not data fields)."""
         found: dict[str, set] = {}
         for url, params in self.calls:
             for key in ("$select", "outFields"):
                 if key in params:
-                    found.setdefault(_source_of(url), set()).update(params[key].split(","))
+                    names = set(params[key].split(",")) - SOCRATA_SYSTEM
+                    found.setdefault(_source_of(url), set()).update(names)
         return found
 
     def install(self, monkeypatch):

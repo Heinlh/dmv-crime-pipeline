@@ -11,9 +11,12 @@ is not requested. Each layer's field list is read first and only the
 allowlisted fields it has are requested; see config DC["fields"].
 
 Incremental strategy: filter on REPORT_DAT (epoch milliseconds) greater
-than the stored watermark, page with resultOffset ordered by REPORT_DAT,
-and advance the watermark to the max REPORT_DAT seen. Same overlap and
-dedupe approach as the Montgomery County extractor.
+than the stored watermark, page with resultOffset ordered by REPORT_DAT
+then the object id (unique, so pages never overlap or skip rows),
+and advance the watermark to the max REPORT_DAT seen, once the batch is
+landed. A REPORT_DAT watermark already catches late reports, since a late
+report carries a late REPORT_DAT. land_changed stores only incidents that
+are new or changed, so the 24 hour overlap costs nothing in storage.
 """
 
 import logging
@@ -21,8 +24,9 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from config import DC
-from extractors.base import (arcgis_fields, land_raw, make_session, read_watermark,
-                             request_json, select_fields, write_watermark)
+from extractors.base import (arcgis_layer, arcgis_order, land_changed, layer_fields,
+                             layer_object_id, make_session, read_watermark, request_json,
+                             select_fields, write_watermark)
 
 logger = logging.getLogger("dc")
 
@@ -56,7 +60,10 @@ def discover_year_layers(session) -> dict[int, int]:
 
 
 def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
-    fields = select_fields(DC["source_name"], arcgis_fields(session, f"{DC['base_url']}/{layer_id}"))
+    layer = arcgis_layer(session, f"{DC['base_url']}/{layer_id}")
+    fields = select_fields(DC["source_name"], layer_fields(layer))
+    # REPORT_DAT, then the object id: a unique sort, so pages never overlap or skip
+    order = arcgis_order(DC["watermark_field"], layer_object_id(layer))
     url = f"{DC['base_url']}/{layer_id}/query"
     since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
     records: list[dict] = []
@@ -65,7 +72,7 @@ def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
         payload = request_json(session, url, params={
             "where": f"{DC['watermark_field']} > TIMESTAMP '{since_sql}'",
             "outFields": ",".join(fields),
-            "orderByFields": f"{DC['watermark_field']} ASC",
+            "orderByFields": order,
             "returnGeometry": "false",
             "resultOffset": offset,
             "resultRecordCount": DC["page_size"],
@@ -82,7 +89,8 @@ def _query_layer(session, layer_id: int, since: datetime) -> list[dict]:
     return records
 
 
-def extract() -> list[dict]:
+def extract() -> tuple[list[dict], datetime | None]:
+    """Return (records, the newest REPORT_DAT seen)."""
     session = make_session()
     watermark = read_watermark(DC["source_name"]) - timedelta(hours=OVERLAP_HOURS)
     logger.info("Pulling DC incidents with REPORT_DAT > %s", watermark.isoformat())
@@ -95,16 +103,19 @@ def extract() -> list[dict]:
     for year in sorted(years_in_window):
         records.extend(_query_layer(session, year_layers[year], watermark))
 
+    new_mark = None
     if records:
         max_millis = max(r[DC["watermark_field"]] for r in records if r.get(DC["watermark_field"]))
         new_mark = datetime.fromtimestamp(max_millis / 1000, tz=timezone.utc)
-        write_watermark(DC["source_name"], new_mark)
-    return records
+    return records, new_mark
 
 
 def run() -> None:
-    records = extract()
-    land_raw(records, DC["source_name"])
+    records, new_mark = extract()
+    land_changed(records, DC["source_name"])
+    # only once the batch is safely landed, so a failed landing re-pulls
+    if new_mark:
+        write_watermark(DC["source_name"], new_mark)
 
 
 if __name__ == "__main__":

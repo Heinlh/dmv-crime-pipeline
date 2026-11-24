@@ -6,48 +6,55 @@ Updated once daily by the county; covers a rolling 3-year window.
 Locations are mapped to the nearest 100 block by the county, and the
 county withholds sexual offense records entirely for victim privacy.
 
-Incremental strategy: filter on OccurredOn (epoch milliseconds) past
-the stored watermark. The layer publishes no report-date column and
-reports are routinely filed days after the offense, so the overlap
-window is a deep OVERLAP_DAYS rather than the 24 hours the daily
-sources use; the loader dedupes on CaseNo, so overlap never creates
-duplicates. The layer stores state-plane geometry, so queries request
-outSR=4326 to land plain lat/lng.
+Refresh strategy: the layer has no report-date column and no per-row edit
+tracking, only a layer-wide editingInfo.dataLastEditDate. So whenever
+that moves, the extractor re-pulls the whole layer, which its 3-year
+window keeps to a handful of pages, and land_changed stores only the
+incidents that are new or differ from their latest stored version.
+Incidents that roll out of the county's window are simply not fetched
+again, so their last stored version stays on the data branch.
+
+Paging sorts on the layer's object id, unique per row, so pages can
+neither overlap nor skip rows. The previous occurrence-time watermark,
+paged on the non-unique OccurredOn, held 1,692 of the 3,203 rows the
+county published for October 2026. The layer stores state-plane
+geometry, so queries request outSR=4326 to land plain lat/lng.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 from config import PWC_VA
-from extractors.base import (arcgis_fields, land_raw, make_session, read_watermark,
-                             request_json, select_fields, write_watermark)
+from extractors.base import (arcgis_layer, arcgis_order, land_changed, layer_fields,
+                             layer_object_id, make_session, read_state, request_json,
+                             select_fields, write_state)
 
 logger = logging.getLogger("pwc")
 
-# Deep overlap: PWC keys records on occurrence time, not report time, so
-# a shallow window would permanently miss reports filed late. Seven days
-# catches the practical filing lag; the transform dedupes the re-pulls.
-OVERLAP_DAYS = 7
+STATE_KEY = "pwc:data_last_edit"
 
 
-def extract() -> list[dict]:
+def extract() -> tuple[list[dict], int | None]:
+    """Return (records, the layer's dataLastEditDate)."""
     session = make_session()
-    watermark = read_watermark(PWC_VA["source_name"]) - timedelta(days=OVERLAP_DAYS)
-    since_sql = watermark.strftime("%Y-%m-%d %H:%M:%S")
-    logger.info("Pulling Prince William incidents with OccurredOn > %s", since_sql)
-
     layer_url = f"{PWC_VA['base_url']}/{PWC_VA['layer_id']}"
+    layer = arcgis_layer(session, layer_url)
+    edited = (layer.get("editingInfo") or {}).get("dataLastEditDate")
+    prior = read_state(STATE_KEY)
+    if prior is not None and edited is not None and edited == prior:
+        logger.info("Layer unchanged since dataLastEditDate %s; nothing to fetch", prior)
+        return [], edited
+
     # latitude/longitude are flattened from the geometry below
-    fields = select_fields(PWC_VA["source_name"], arcgis_fields(session, layer_url),
+    fields = select_fields(PWC_VA["source_name"], layer_fields(layer),
                            derived=("latitude", "longitude"))
-    url = f"{layer_url}/query"
+    order = arcgis_order(None, layer_object_id(layer))
     records: list[dict] = []
     offset = 0
     while True:
-        payload = request_json(session, url, params={
-            "where": f"{PWC_VA['watermark_field']} > TIMESTAMP '{since_sql}'",
+        payload = request_json(session, f"{layer_url}/query", params={
+            "where": "1=1",
             "outFields": ",".join(fields),
-            "orderByFields": f"{PWC_VA['watermark_field']} ASC",
+            "orderByFields": order,
             "returnGeometry": "true",
             "outSR": "4326",
             "resultOffset": offset,
@@ -65,20 +72,15 @@ def extract() -> list[dict]:
             records.append(record)
         logger.info("Public_Crime_Reports: fetched offset %d (%d rows)", offset, len(features))
         if len(features) < PWC_VA["page_size"]:
-            break
+            return records, edited
         offset += PWC_VA["page_size"]
-
-    if records:
-        max_millis = max(r[PWC_VA["watermark_field"]] for r in records
-                         if r.get(PWC_VA["watermark_field"]))
-        new_mark = datetime.fromtimestamp(max_millis / 1000, tz=timezone.utc)
-        write_watermark(PWC_VA["source_name"], new_mark)
-    return records
 
 
 def run() -> None:
-    records = extract()
-    land_raw(records, PWC_VA["source_name"])
+    records, edited = extract()
+    land_changed(records, PWC_VA["source_name"])
+    if edited is not None:
+        write_state(STATE_KEY, edited)
 
 
 if __name__ == "__main__":

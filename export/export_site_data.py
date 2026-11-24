@@ -37,6 +37,15 @@ logger = logging.getLogger(__name__)
 INCIDENT_WINDOW_DAYS = 90
 HEATMAP_WINDOW_DAYS = 90
 
+# The history the site reports on: from 2016 (where the Montgomery County
+# dataset, the longest-running source, begins) to today. A handful of
+# records fall outside it: DC has offenses dated as early as 1940 and
+# Fairfax 1980, either typos or old offenses reported recently. They stay
+# in the warehouse but out of the site's totals and history, so the front
+# page cannot claim "records since 2016" over a "starts 1940" subtitle.
+HISTORY_START = "2016-01-01"
+IN_HISTORY = (f"CAST(occurred_at AS DATE) BETWEEN DATE '{HISTORY_START}' AND current_date")
+
 # H3 hotspot layer: resolution 8 cells average ~0.74 km2, coarse enough
 # that a cell never sharpens a block-level location, fine enough to show
 # neighborhood-scale concentrations. Windows are days of history.
@@ -96,10 +105,15 @@ def _rows_as_dicts(con, sql: str) -> list[dict]:
 
 
 def _summary(con) -> dict:
-    total = con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0]
-    by_source = con.execute(
-        "SELECT jurisdiction, COUNT(*) FROM marts.fct_incidents GROUP BY 1 ORDER BY 1"
-    ).fetchall()
+    total, outside = con.execute(f"""
+        SELECT COUNT(*) FILTER (WHERE {IN_HISTORY}),
+               COUNT(*) FILTER (WHERE NOT ({IN_HISTORY}) OR occurred_at IS NULL)
+        FROM marts.fct_incidents
+    """).fetchone()
+    by_source = con.execute(f"""
+        SELECT jurisdiction, COUNT(*) FROM marts.fct_incidents
+        WHERE {IN_HISTORY} GROUP BY 1 ORDER BY 1
+    """).fetchall()
     new_24h, new_48h = con.execute(f"""
         SELECT
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 24 HOUR),
@@ -113,7 +127,7 @@ def _summary(con) -> dict:
             COUNT(*) FILTER (WHERE occurred_at >= {NOW} - INTERVAL 14 DAY
                                 AND occurred_at < {NOW} - INTERVAL 7 DAY),
             100.0 * COUNT(*) FILTER (WHERE latitude IS NULL) / GREATEST(COUNT(*), 1),
-            CAST(MIN(CAST(occurred_at AS DATE)) AS VARCHAR)
+            CAST(MIN(CAST(occurred_at AS DATE)) FILTER (WHERE {IN_HISTORY}) AS VARCHAR)
         FROM marts.fct_incidents
     """).fetchone()
     top_category_row = con.execute(f"""
@@ -127,6 +141,8 @@ def _summary(con) -> dict:
         "last_updated": con.execute("SELECT strftime(now(), '%Y-%m-%dT%H:%M:%SZ')").fetchone()[0],
         "sources_active": [j for j, _ in by_source],
         "total_records": total,
+        # dated before HISTORY_START, in the future, or undated
+        "records_outside_history": outside,
         "records_by_jurisdiction": {j: n for j, n in by_source},
         "data_start_date": data_start,
         "incident_window_days": INCIDENT_WINDOW_DAYS,
@@ -165,14 +181,13 @@ def _incidents(con) -> dict:
 def _trends(con) -> dict:
     # occurred_at sanity bounds guard against source-side typo dates
     # (year 1900 or 2216) polluting the aggregates.
-    rows = con.execute("""
+    rows = con.execute(f"""
         SELECT
             CAST(occurred_date AS VARCHAR) AS date,
             jurisdiction, offense_category,
             SUM(incident_count) AS count
         FROM marts.daily_counts
-        WHERE occurred_date >= DATE '2016-01-01'
-          AND occurred_date <= current_date
+        WHERE occurred_date BETWEEN DATE '{HISTORY_START}' AND current_date
         GROUP BY 1, 2, 3
         ORDER BY 1, 2, 3
     """).fetchall()

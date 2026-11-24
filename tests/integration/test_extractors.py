@@ -40,11 +40,16 @@ def test_lands_only_allowlisted_stamped_columns(paths, world, source):
     assert frame[config.EXTRACTED_AT].nunique() == 1, "one batch, one extraction time"
 
 
+# where each source keeps its refresh state
+STATE_KEYS = {"moco": "moco:updated_at", "pgc": "pgc:rows_updated_at",
+              "pwc": "pwc:data_last_edit", "dc": "dc", "fairfax": "fairfax"}
+
+
 @pytest.mark.parametrize("source", sorted(MODULES))
-def test_advances_the_watermark(paths, world, source):
+def test_records_its_refresh_state(paths, world, source):
     MODULES[source].run()
     state = json.loads(paths["STATE_PATH"].read_text())
-    assert source in state
+    assert state.get(STATE_KEYS[source]) is not None
 
 
 def test_pgc_lands_block_level_locations_only(paths, world):
@@ -67,11 +72,12 @@ def test_geometry_becomes_coordinates_for_arcgis_point_sources(paths, world):
     assert landed(paths, "pwc").iloc[0]["latitude"] == "38.641"
 
 
-def test_a_second_run_pulls_only_the_overlap(paths, world):
-    """Incremental: after one run, the next asks only for recent records."""
+def test_moco_pulls_everything_once_then_only_updates(paths, world):
+    """No watermark: the whole dataset. After that: only :updated_at newer."""
     moco.run()
-    first_since = [p["$where"] for u, p in world.calls if "/resource/" in u][-1]
+    first = [p for u, p in world.calls if u == config.MOCO["base_url"]]
+    assert all("$where" not in p for p in first)
     world.calls.clear()
     moco.run()
-    second_since = [p["$where"] for u, p in world.calls if "/resource/" in u][-1]
-    assert second_since > first_since
+    second = [p for u, p in world.calls if u == config.MOCO["base_url"]]
+    assert second and second[0]["$where"].startswith(":updated_at > '")
