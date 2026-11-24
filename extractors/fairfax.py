@@ -19,25 +19,27 @@ location detail FCPD releases.
 
 Incremental strategy: filter on the layer's watermark field (epoch
 milliseconds) greater than the stored source watermark, page with
-resultOffset, and advance the watermark to the max value seen across
-all services. A service that fails logs and is skipped so one group
-never blocks the others.
+resultOffset sorted on that field then the object id (unique, so pages
+never overlap or skip rows), and advance the watermark to the max value
+seen across all services once the batch is landed. land_changed stores
+only incidents that are new or changed. A service that fails logs and is
+skipped so one group never blocks the others.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
 
 from config import FAIRFAX
-from extractors.base import (land_raw, make_session, read_watermark, request_json,
-                             select_fields, write_watermark)
+from extractors.base import (arcgis_order, land_changed, layer_object_id, make_session,
+                             read_watermark, request_json, select_fields, write_watermark)
 
 logger = logging.getLogger("fairfax")
 
 OVERLAP_HOURS = 24
 
 
-def _layer_info(session, service: str) -> tuple[int, list[str]] | None:
-    """Return (layer_id, field_names) for the service's single layer.
+def _layer_info(session, service: str) -> tuple[int, list[str], str] | None:
+    """Return (layer_id, field_names, object_id_field) for the service's single layer.
     The layer id is not always 0 (Person uses 1), so ask the server."""
     base = f"{FAIRFAX['base_url']}/{service}/FeatureServer"
     root = request_json(session, base, params={"f": "json"})
@@ -47,14 +49,14 @@ def _layer_info(session, service: str) -> tuple[int, list[str]] | None:
     layer_id = root["layers"][0]["id"]
     layer = request_json(session, f"{base}/{layer_id}", params={"f": "json"})
     fields = [f["name"] for f in layer.get("fields", [])]
-    return layer_id, fields
+    return layer_id, fields, layer_object_id(layer)
 
 
 def _query_service(session, service: str, since: datetime) -> tuple[list[dict], str | None]:
     info = _layer_info(session, service)
     if info is None:
         return [], None
-    layer_id, fields = info
+    layer_id, fields, object_id = info
 
     watermark_field = next((f for f in FAIRFAX["watermark_fields"] if f in fields), None)
     if watermark_field is None:
@@ -72,7 +74,8 @@ def _query_service(session, service: str, since: datetime) -> tuple[list[dict], 
         payload = request_json(session, url, params={
             "where": f"{watermark_field} > TIMESTAMP '{since_sql}'",
             "outFields": ",".join(out_fields),
-            "orderByFields": f"{watermark_field} ASC",
+            # then the object id: a unique sort, so pages never overlap or skip
+            "orderByFields": arcgis_order(watermark_field, object_id),
             "returnGeometry": "true",
             "resultOffset": offset,
             "resultRecordCount": FAIRFAX["page_size"],
@@ -96,7 +99,8 @@ def _query_service(session, service: str, since: datetime) -> tuple[list[dict], 
     return records, watermark_field
 
 
-def extract() -> list[dict]:
+def extract() -> tuple[list[dict], datetime | None]:
+    """Return (records, the newest report time seen across services)."""
     session = make_session()
     watermark = read_watermark(FAIRFAX["source_name"]) - timedelta(hours=OVERLAP_HOURS)
     logger.info("Pulling Fairfax incidents reported after %s", watermark.isoformat())
@@ -114,15 +118,16 @@ def extract() -> list[dict]:
         except Exception:
             logger.exception("Service %s failed; continuing with the others", service)
 
-    if max_millis:
-        new_mark = datetime.fromtimestamp(max_millis / 1000, tz=timezone.utc)
-        write_watermark(FAIRFAX["source_name"], new_mark)
-    return records
+    new_mark = datetime.fromtimestamp(max_millis / 1000, tz=timezone.utc) if max_millis else None
+    return records, new_mark
 
 
 def run() -> None:
-    records = extract()
-    land_raw(records, FAIRFAX["source_name"])
+    records, new_mark = extract()
+    land_changed(records, FAIRFAX["source_name"])
+    # only once the batch is safely landed, so a failed landing re-pulls
+    if new_mark:
+        write_watermark(FAIRFAX["source_name"], new_mark)
 
 
 if __name__ == "__main__":

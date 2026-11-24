@@ -60,6 +60,11 @@ class Day:
     def save(self, message: str):
         sh(self.root, "bash", str(SCRIPT), "save", ".datastore", message)
 
+    def incident(self, key: str) -> dict:
+        payload = json.loads((self.site / "incidents.json").read_text())
+        rows = [dict(zip(payload["columns"], row)) for row in payload["rows"]]
+        return next(r for r in rows if r["incident_key"] == key)
+
     def incident_keys(self) -> set:
         payload = json.loads((self.site / "incidents.json").read_text())
         index = payload["columns"].index("incident_key")
@@ -85,7 +90,7 @@ def test_three_days_through_the_data_branch(remote, monkeypatch):
 
     # day 2: a new Montgomery incident is published overnight
     fresh = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
-    world.socrata[config.MOCO["base_url"]]["records"].append({
+    world.publish(config.MOCO["base_url"], {
         "incident_id": "201300099", "offence_code": "1200", "case_number": "26059999",
         "start_date": iso(fresh), "crimename2": "Robbery", "district": "WHEATON",
         "location": "11200 BLK  GEORGIA AVE", "address_number": "11234",
@@ -95,9 +100,9 @@ def test_three_days_through_the_data_branch(remote, monkeypatch):
     world.calls.clear()
     assert run_pipeline.main() == 0
     day2.save("data: run 2")
-    # incremental: day 2 asked Montgomery only for records after day 1's watermark
+    # incremental: day 2 asked Montgomery only for rows updated since day 1
     where = next(p["$where"] for u, p in world.calls if u == config.MOCO["base_url"])
-    assert "2016-" not in where
+    assert where.startswith(":updated_at > '")
     # day 2's site has day 1's incidents (from the branch) plus the new one
     assert day2.incident_keys() == first_keys | {"moco-201300099"}
 
@@ -165,3 +170,46 @@ def test_warehouse_reads_the_branch_not_the_checkout(remote, monkeypatch):
     con = duckdb.connect(str(config.WAREHOUSE_PATH), read_only=True)
     assert con.execute("SELECT COUNT(*) FROM marts.fct_incidents").fetchone()[0] == 8
     con.close()
+
+
+def test_late_and_corrected_records_reach_the_site(remote, monkeypatch):
+    """Findings 1 and 2 across real CI days: a Montgomery report published
+    weeks after the offense, a Prince William offense added long after it
+    occurred, and a Montgomery reclassification, each appearing on a later
+    day, all reach the site, and survive a rebuild from the branch alone."""
+    from tests.fakes import epoch_ms
+    world = build_world().install(monkeypatch)
+    day1 = Day(remote, "day1", monkeypatch)
+    assert run_pipeline.main() == 0
+    day1.save("data: run 1")
+    assert day1.incident("moco-201300001")["offense_category"] == "vehicle"
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    world.publish(config.MOCO["base_url"], {
+        "incident_id": "201300777", "offence_code": "0501", "start_date": iso(now - timedelta(days=20)),
+        "crimename2": "Burglary/Breaking and Entering", "location": "800 BLK  ELLSWORTH DR",
+        "latitude": "38.9967", "longitude": "-77.0261"})
+    world.publish(config.MOCO["base_url"], {
+        **{k: v for k, v in world.socrata[config.MOCO["base_url"]]["records"][0].items()
+           if not k.startswith(":")},
+        "crimename2": "Robbery", "crimename3": "ROBBERY - STREET"},
+        replace=lambda r: r["incident_id"] == "201300001")
+    world.publish(f"{config.PWC_VA['base_url']}/0", {"attributes": {
+        "InstanceID": "pwc-77", "CaseNo": "PD260007777", "OccurredOn": epoch_ms(now - timedelta(days=25)),
+        "BlockAddress": "4300 Dale Blvd", "City": "DALE CITY", "IBRCode": "BURGLARY",
+        "CrimeCategory": "Burglary"}, "geometry": {"x": -77.31, "y": 38.64}})
+
+    day2 = Day(remote, "day2", monkeypatch)
+    assert run_pipeline.main() == 0
+    day2.save("data: run 2")
+    assert {"moco-201300777", "pwc-PD260007777"} <= day2.incident_keys()
+    assert day2.incident("moco-201300001")["offense_category"] == "violent"
+
+    # a fresh clone with the agencies down rebuilds the same thing
+    for module in ("moco", "pgc", "dc", "fairfax", "pwc"):
+        monkeypatch.setattr(f"extractors.{module}.request_json", ConnectionError)
+    monkeypatch.setattr("extractors.base.request_json", ConnectionError)
+    day3 = Day(remote, "day3", monkeypatch)
+    run_pipeline.main()
+    assert day3.incident_keys() == day2.incident_keys()
+    assert day3.incident("moco-201300001")["offense_category"] == "violent"

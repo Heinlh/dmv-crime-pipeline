@@ -207,10 +207,61 @@ python run_pipeline.py
 The first run backfills the full available history from BACKFILL_START
 (config.py, July 2016, where the Montgomery County dataset begins; DC's
 per-year layers are discovered from the FeatureServer automatically).
-Subsequent runs are incremental: each extractor stores a per-source
-watermark in state/watermarks.json and only pulls records newer than it,
-minus a 24 hour overlap window to catch agency corrections. The loader
-dedupes on the source incident id, so overlap never produces duplicates.
+Subsequent runs pull only what changed, by a per-source strategy (next
+section), and record their state in state/watermarks.json.
+
+## How each source refreshes
+
+Agencies publish reports days or weeks after the offense, and correct
+them later. A watermark on when the offense occurred never asks about an
+old offense again once newer ones have been seen, so it missed both: in
+September 2026 the warehouse held 1,833 of the 3,629 rows Montgomery
+County published, and in October 2026, 1,692 of Prince William's 3,203.
+Each extractor therefore tracks what the agency changed, not when the
+offense happened:
+
+| Source | Asks the agency for | State key |
+|---|---|---|
+| Montgomery | rows whose Socrata `:updated_at` is newer than the last run (less a day), then every row of each incident touched | `moco:updated_at` |
+| Prince George's | the whole current dataset, only when its `rowsUpdatedAt` has moved (the county republishes weekly, all at once) | `pgc:rows_updated_at` |
+| Prince William | the whole layer (a rolling 3-year window), only when its `dataLastEditDate` has moved | `pwc:data_last_edit` |
+| DC | rows whose `REPORT_DAT` is newer than the last run (less a day); a late report carries a late `REPORT_DAT` | `dc` |
+| Fairfax | rows whose report date is newer than the last run (less a day), per service | `fairfax` |
+
+Every paged query sorts on a unique key last (Socrata `:id`, the ArcGIS
+object id). Sorting on a column with ties, as the old queries did, lets a
+server return tied rows in a different order on each page request, so
+offset paging repeats some rows and skips others.
+
+Re-pulling more than is new costs nothing in storage: `land_changed`
+compares each incident with its latest stored version and lands only
+incidents that are new or differ, so a quiet day adds no files. State is
+written only after the batch is landed, so a failed run re-pulls.
+
+## Which version the warehouse shows
+
+An incident's latest extraction is its current state: the transform
+keeps, per incident, only the rows from the most recent `_extracted_at`,
+so a reclassification replaces the original even when it is less severe,
+and a row the agency withdrew drops out. Among those rows, the most severe
+offense represents the incident, and remaining ties break on a hash of the
+row's content, so rebuilding twice, or landing the same rows in a
+different order, gives identical marts.
+
+Fairfax is the exception. An incident's rows come from up to three
+services that refresh independently, and the county regenerates
+`UniqueID` between pulls, so no single extraction holds a Fairfax incident
+whole. Fairfax versions by row instead: every distinct row ever seen
+(ignoring `UniqueID`) counts, and the most severe represents the incident.
+
+## History bounds
+
+The site's history starts on 1 January 2016 (`HISTORY_START` in
+`export/export_site_data.py`). Records dated before it, in the future, or
+not at all (DC carries offenses dated as early as 1940) stay in the
+warehouse but are left out of the totals, the trends and the front page's
+"warehouse starts" date, and are counted in `summary.json` as
+`records_outside_history`.
 
 ## Design decisions
 
@@ -240,7 +291,8 @@ dedupes on the source incident id, so overlap never produces duplicates.
   July 2016, UCR/NIBRS classified, preliminary reports subject to change.
 - DC: MPD Crime Incidents feature layers (one per year, configured in
   config.py). REPORT_DAT drives incrementality; coordinates are
-  anonymized to the block.
+  anonymized to the block. A few records carry offense dates decades
+  back (1940); they fall outside the history bounds above.
 - Both agencies publish with a lag of one or more days. Dashboards
   should say "as of last published data", not "live".
 
@@ -258,14 +310,17 @@ the browser tier loading the site's CDN libraries as a visitor would.
 
 | Tier | Covers |
 |---|---|
-| `unit` | field allowlists, block-level coarsening, landing, extraction stamps, path overrides |
-| `integration` | every real extractor against faked agency APIs (`tests/fakes.py`), the loader and transform on what they land, the raw-zone migration, and `datastore.sh` against a throwaway git remote |
-| `e2e` | `run_pipeline.main()` over several simulated days with all state carried by a `data` branch, a rebuild from the branch alone with every agency down, and the first-run migration |
-| `browser` | the built site in Chromium through Playwright: map, case lookup, events search, and that no exact address reaches a visitor |
+| `unit` | field allowlists, block-level coarsening, landing, extraction stamps, path overrides, change detection (what `land_changed` stores), unique paging sorts |
+| `integration` | every real extractor against faked agency APIs (`tests/fakes.py`), late reports and corrections being picked up, unchanged datasets not re-fetched, tied rows paging exactly once, state not advancing when landing fails, which version the transform shows, the history bounds, the loader and transform on what they land, the raw-zone migration, and `datastore.sh` against a throwaway git remote |
+| `e2e` | `run_pipeline.main()` over several simulated days with all state carried by a `data` branch, late and corrected records published between days, a rebuild from the branch alone with every agency down, and the first-run migration |
+| `browser` | the built site, from two simulated days, in Chromium through Playwright: map, case lookup, events search, late records and a correction as a visitor sees them, the front page's history start, and that no exact address reaches a visitor |
 
 The faked agencies publish the same extra fields the real ones do (house
 numbers, victim demographics), so the tests prove those are never
-requested or landed. Behind a proxy or offline, `TEST_VENDOR_DIR` points
+requested or landed. They also keep `:updated_at`, `rowsUpdatedAt` and
+`dataLastEditDate` as the real services do, and return rows tied in a
+query's sort in a different order on each request, which is how the real
+servers lost rows. Behind a proxy or offline, `TEST_VENDOR_DIR` points
 the browser tier at a local `node_modules/` holding Leaflet,
 Leaflet.markercluster and Chart.js, and `PW_CHROMIUM_EXECUTABLE` at a
 specific Chromium build.
